@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "name": "NERO Swipe Reader",
+  "version": "0.2.0",
+  "description": "ウォッチリストをスワイプで読み、noteのログイン状態でスキ・コメント・未返信管理ができるメンバー向けリーダー。",
+  "permissions": ["storage", "https://note.com/*"],
+  "background": {
+    "scripts": [
+      "background.js",
+      "app-api-core.js",
+      "member-api.js",
+      "app-api-inbox.js",
+      "member-inbox.js",
+      "app-api-priority.js",
+      "app-api-router.js"
+    ],
+    "persistent": false
+  },
+  "browser_action": { "default_title": "NERO Swipe Readerを開く" },
+  "icons": { "48": "icon.svg", "96": "icon.svg" },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "swipe-reader@neronote100.github.io",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["personalCommunications", "websiteActivity"]
+      }
+    },
+    "gecko_android": { "strict_min_version": "142.0" }
+  },
+  "content_security_policy": "script-src 'self'; object-src 'none'; connect-src https://note.com; img-src https: data:; style-src 'self'; frame-src 'none'"
+}

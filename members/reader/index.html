@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NERO Swipe Reader</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="index.html"
+        ><img src="../icon.svg" alt="" width="36" height="36" /><span
+          >NERO <small>SWIPE READER</small></span
+        ></a
+      >
+      <div>
+        <span id="account">接続を確認中</span
+        ><button id="connect">再確認</button
+        ><a href="https://note.com/login" target="_blank" rel="noreferrer"
+          >noteにログイン ↗</a
+        >
+      </div>
+    </header>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <main>
+      <aside class="library">
+        <p class="eyebrow">YOUR READING ROOM</p>
+        <h1>読む時間を、<br />もっと自由に。</h1>
+        <p class="muted">
+          気になる書き手の新着をめくる。<br />届いた言葉に、ここから返す。
+        </p>
+        <h2>ウォッチリスト <span id="watchCount">0</span></h2>
+        <form id="watchForm">
+          <label for="watchInput">noteのユーザー名・プロフィールURL</label>
+          <div class="input-row">
+            <input
+              id="watchInput"
+              placeholder="例：nero_notelover"
+              required
+              maxlength="200"
+            /><button type="submit">追加</button>
+          </div>
+        </form>
+        <ul id="watchList"></ul>
+        <button id="refreshFeed" class="primary wide">新着記事を取得</button>
+        <p id="feedStatus" class="muted">1人につき最新の1記事を表示します。</p>
+        <details>
+          <summary>使い方・データ管理</summary>
+          <p>
+            同じFirefoxでnoteにログインしてください。上下のスワイプ、矢印キー、前後ボタンで記事を切り替えます。本文のスクロール中は切り替えません。
+          </p>
+          <p>
+            ウォッチリストと下書きはアカウント別にこの端末へ保存します。未返信の判定は同じスレッドで自分の最後の返信より後に届いたコメントです。
+          </p>
+          <a href="../PRIVACY.md" target="_blank">プライバシー方針 ↗</a
+          ><button id="clearData" class="wide">
+            このアカウントの保存データを削除
+          </button>
+        </details>
+      </aside>
+      <section class="reading" aria-label="記事リーダー">
+        <div class="reader-toolbar">
+          <span class="eyebrow">WATCHLIST / LATEST</span
+          ><span id="position">0 / 0</span>
+        </div>
+        <div id="articleScroll" tabindex="0">
+          <div id="empty">
+            <span class="moon">☾</span>
+            <h2>次のお気に入りに、出会おう。</h2>
+            <p>
+              ウォッチリストに書き手を追加して、<br />「新着記事を取得」を押してください。
+            </p>
+          </div>
+          <article id="article" hidden>
+            <p id="author" class="muted"></p>
+            <h2 id="title"></h2>
+            <img id="cover" alt="" hidden />
+            <div id="body"></div>
+            <a id="original" target="_blank" rel="noreferrer"
+              >noteで記事を開く ↗</a
+            >
+          </article>
+        </div>
+        <nav class="article-actions" aria-label="記事の操作">
+          <button id="prev" aria-label="前の記事">↑ 前へ</button
+          ><button id="like" disabled>♡ スキ</button
+          ><button id="articleComment" disabled>コメント</button
+          ><button id="next" aria-label="次の記事">次へ ↓</button>
+        </nav>
+        <p class="hint">上・下にスワイプ / ↑ ↓ キーで切り替え</p>
+      </section>
+      <aside class="inbox">
+        <div class="section-heading">
+          <h2>返信待ち <span id="inboxCount">0</span></h2>
+          <button id="scan">一括取得</button>
+        </div>
+        <div class="scan-options">
+          <label><input id="fullScan" type="checkbox" />全記事を再確認</label
+          ><button id="cancelScan" hidden>中断</button>
+        </div>
+        <p id="scanStatus" class="muted" aria-live="polite">
+          一括取得で、自分の記事の未返信を確認できます。
+        </p>
+        <progress id="progress" hidden></progress>
+        <div id="inboxList"></div>
+        <button id="moreInbox" hidden>さらに30件</button>
+        <section id="composer" hidden>
+          <p class="eyebrow" id="composerKind">REPLY</p>
+          <h3 id="composerTitle"></h3>
+          <blockquote id="context"></blockquote>
+          <label for="draft">メッセージ</label
+          ><textarea
+            id="draft"
+            maxlength="500"
+            rows="6"
+            placeholder="あなたの言葉で、ひとこと。"
+          ></textarea>
+          <p class="muted">
+            <span id="draftCount">0</span> / 500 · 下書きは端末に保存
+          </p>
+          <div class="input-row">
+            <button id="closeComposer">閉じる</button
+            ><button id="send" class="primary">送信する</button>
+          </div>
+          <p id="sendStatus" role="status"></p>
+          <button id="resolveUnknown" hidden>noteで結果を確認しました</button>
+        </section>
+      </aside>
+    </main>
+    <script src="model.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
