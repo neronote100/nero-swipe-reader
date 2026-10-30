@@ -10,6 +10,9 @@
     "check:local-auto": "node --check extension/local-auto.js && node tests/local-auto-check.mjs && node tests/return-likes-v141-check.mjs",
     "build:extension": "npm run materialize && node scripts/build-extension.mjs",
     "package:extension": "npm run materialize && bash scripts/package-extension.sh",
-    "materialize": "node scripts/materialize-sources.mjs"
+    "materialize": "node scripts/materialize-sources.mjs",
+    "build:members": "npm run materialize && node scripts/build-members.mjs",
+    "check:members": "npm run build:members && node tests/members-check.mjs",
+    "package:members": "npm run check:members && node scripts/package-members.mjs"
   }
 }
