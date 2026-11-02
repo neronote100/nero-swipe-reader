@@ -48,9 +48,22 @@ const ctx = vm.createContext({
   setTimeout,
   clearTimeout,
   fetch: async (url, opts = {}) => {
-    if(url.includes('/note_comments?')){
-      const page=Number(new URL(url).searchParams.get('page'));
-      return {ok:true,json:async()=>({data:[{key:'c'+page,user:{urlname:'reader'},comment:{type:'text',value:'hello'},reply_count:0}],next_page:page<12?page+1:null})};
+    if (url.includes("/note_comments?")) {
+      const page = Number(new URL(url).searchParams.get("page"));
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              key: "c" + page,
+              user: { urlname: "reader" },
+              comment: { type: "text", value: "hello" },
+              reply_count: 0,
+            },
+          ],
+          next_page: page < 12 ? page + 1 : null,
+        }),
+      };
     }
     if (url.endsWith("/v2/current_user"))
       return {
@@ -181,18 +194,159 @@ const unresolved = ctx.NeroAppInbox.unresolvedReplyComments(
       body: "c",
       creatorLiked: true,
     },
+    {
+      key: "4",
+      threadIndex: 0,
+      authorUrlname: "bob",
+      body: "viewer liked",
+      viewerLiked: true,
+    },
+    {
+      key: "5",
+      threadIndex: 0,
+      authorUrlname: "bob",
+      body: "unhandled",
+      creatorLiked: false,
+      viewerLiked: false,
+    },
+    {
+      key: "6",
+      threadIndex: 1,
+      authorUrlname: "carol",
+      body: "root liked",
+      creatorLiked: true,
+    },
+    {
+      key: "7",
+      threadIndex: 1,
+      depth: 1,
+      authorUrlname: "carol",
+      body: "unliked reply",
+      rootKey: "6",
+    },
+    {
+      key: "8",
+      threadIndex: 2,
+      authorUrlname: "dave",
+      body: "likes from others",
+      creatorLiked: false,
+      viewerLiked: false,
+      likeCount: 10,
+    },
   ],
   "alice",
 );
-assert.equal(unresolved.length, 1);
+assert.equal(unresolved.length, 3);
 assert.equal(
-  unresolved[0].key,
-  "3",
-  "a liked comment after the last reply is still unresolved",
+  unresolved.map((c) => c.key).join(","),
+  "5,7,8",
+  "owner-liked comments are excluded without hiding unliked replies or others' likes",
 );
+// Cached results from v0.2.0 must follow the new policy before a new scan.
+const cacheKey = A.cacheKey(A.C.INBOX_PREFIX, "alice");
+const articleUrl = "https://note.com/alice/n/ncached";
+storage[cacheKey] = {
+  articles: {
+    [articleUrl]: {
+      articleUrl,
+      articleTitle: "Cached article",
+      commentCount: 4,
+      checkedAt: Date.now(),
+      unresolved: [
+        {
+          key: "liked-creator",
+          authorUrlname: "bob",
+          body: "handled",
+          creatorLiked: true,
+        },
+        {
+          key: "liked-viewer",
+          authorUrlname: "bob",
+          body: "handled",
+          viewerLiked: true,
+        },
+        {
+          key: "liked-legacy",
+          authorUrlname: "bob",
+          body: "handled",
+          liked: true,
+        },
+        {
+          key: "pending",
+          authorUrlname: "bob",
+          body: "pending",
+          creatorLiked: false,
+          viewerLiked: false,
+        },
+      ],
+    },
+  },
+};
+assert.equal(
+  (await ctx.NeroAppInbox.status("alice")).items
+    .map((x) => x.comment.key)
+    .join(","),
+  "pending",
+);
+const noteAction = A.noteAction,
+  creatorArticles = A.creatorArticles;
+try {
+  A.creatorArticles = async () => [
+    { url: articleUrl, name: "Article", commentCount: 2 },
+  ];
+  A.noteAction = async (action) =>
+    action === "account"
+      ? { ok: true, urlname: "alice" }
+      : {
+          ok: true,
+          viewerUrlname: "alice",
+          comments: [
+            {
+              key: "remote-liked",
+              threadIndex: 0,
+              authorUrlname: "bob",
+              body: "handled on note",
+              creatorLiked: true,
+              viewerLiked: true,
+            },
+            {
+              key: "remote-pending",
+              threadIndex: 1,
+              authorUrlname: "carol",
+              body: "not handled",
+              creatorLiked: false,
+              viewerLiked: false,
+            },
+          ],
+        };
+  const scanned = await ctx.NeroAppInbox.scan(
+    { postMessage() {} },
+    "scan-test",
+  );
+  assert.equal(scanned.ok, true);
+  assert.equal(scanned.checkedArticles, 1);
+  assert.equal(
+    scanned.items.map((x) => x.comment.key).join(","),
+    "remote-pending",
+  );
+  assert.equal(
+    storage[cacheKey].articles[articleUrl].unresolved
+      .map((c) => c.key)
+      .join(","),
+    "remote-pending",
+    "liked comments must not be saved as pending",
+  );
+} finally {
+  A.noteAction = noteAction;
+  A.creatorArticles = creatorArticles;
+}
+assert.equal(A.C.VERSION, manifest.version);
 const source = fs.readFileSync(out + "background.js", "utf8");
-const manyComments=await ctx.NeroBackgroundTest.fetchNoteComments('npages',true);
-assert.equal(manyComments.length,12,'scan must follow more than ten pages');
+const manyComments = await ctx.NeroBackgroundTest.fetchNoteComments(
+  "npages",
+  true,
+);
+assert.equal(manyComments.length, 12, "scan must follow more than ten pages");
 assert.ok(!source.includes("slice(0, summaryOnly ? 1000 : 2000)"));
 for (const file of [
   "reader/model.js",
