@@ -1,0 +1,2 @@
+c7edcd5f70e9a2098d824db7644bab2142902e605fb7d4fd977c61e13f4efa22  nero-swipe-reader-0.2.1-source.zip
+cd788fa464c9b44d80b69c710ed5027f26a9452e7f908b2165854dcd72fab1a3  nero-swipe-reader-0.2.1-unsigned.zip
