@@ -69,6 +69,19 @@ background =
   background.slice(0, start) +
   "      return { ...commentResult, commentSent: true };\n    }\n" +
   background.slice(end);
+// A feed must not reuse the two-minute cache or guess an unknown like state.
+const statusCall = "if (action === 'status') return runStatusApi(articleUrl);";
+const statusGuard = "if (!note) throw new Error('missing note');";
+if (!background.includes(statusCall) || !background.includes(statusGuard))
+  throw new Error("Member status patch no longer matches upstream");
+background = background.replace(
+  statusCall,
+  "if (action === 'status') return runStatusApi(articleUrl, message.force === true);",
+);
+background = background.replace(
+  statusGuard,
+  "if (!note || typeof note.is_liked !== 'boolean') throw new Error('unknown like status');",
+);
 fs.writeFileSync(out + "/background.js", background);
 const inbox = fs
   .readFileSync(out + "/app-api-inbox.js", "utf8")
@@ -77,4 +90,17 @@ const inbox = fs
     "if(A.safeOwner(r.viewerUrlname)!==owner)",
   );
 fs.writeFileSync(out + "/app-api-inbox.js", inbox);
+const routerPath = out + "/app-api-router.js";
+const router = fs.readFileSync(routerPath, "utf8");
+const route = "if(action==='article')return A.fetchArticle(args);";
+if (!router.includes(route))
+  throw new Error("Member feed router patch no longer matches upstream");
+fs.writeFileSync(
+  routerPath,
+  router.replace(
+    route,
+    "if(action==='watch_feed')return globalThis.NeroMemberFeed.fetch(port,id,args);" +
+      route,
+  ),
+);
 console.log(path.resolve(out));
