@@ -30,6 +30,25 @@
           気になる書き手の新着をめくる。<br />届いた言葉に、ここから返す。
         </p>
         <h2>ウォッチリスト <span id="watchCount">0</span></h2>
+        <label for="watchSelect">読むリスト</label>
+        <select
+          id="watchSelect"
+          aria-label="ウォッチリストを切り替える"
+        ></select>
+        <div class="input-row list-tools">
+          <button id="renameList" type="button">名前を変更</button>
+          <button id="importList" type="button">読み込み</button>
+          <button id="exportList" type="button">保存</button>
+        </div>
+        <input
+          id="watchFile"
+          type="file"
+          accept=".json,application/json"
+          hidden
+        />
+        <p id="listStatus" class="muted">
+          城下町メンバー＋10個のリストを保存できます。
+        </p>
         <form id="watchForm">
           <label for="watchInput">noteのユーザー名・プロフィールURL</label>
           <div class="input-row">
@@ -42,8 +61,15 @@
           </div>
         </form>
         <ul id="watchList"></ul>
-        <button id="refreshFeed" class="primary wide">新着記事を取得</button>
-        <p id="feedStatus" class="muted">1人につき最新の1記事を表示します。</p>
+        <ul id="pendingMembers" class="pending-members"></ul>
+        <button id="refreshFeed" class="primary wide">
+          未スキの新着記事を取得
+        </button>
+        <button id="cancelFeed" class="wide" hidden>記事取得を中断</button>
+        <progress id="feedProgress" hidden></progress>
+        <p id="feedStatus" class="muted">
+          1人の直近3記事からスキ済みを除き、ランダムに表示します。
+        </p>
         <details>
           <summary>使い方・データ管理</summary>
           <p>
@@ -60,7 +86,7 @@
       </aside>
       <section class="reading" aria-label="記事リーダー">
         <div class="reader-toolbar">
-          <span class="eyebrow">WATCHLIST / LATEST</span
+          <span class="eyebrow" id="readerListName">WATCHLIST / RANDOM</span
           ><span id="position">0 / 0</span>
         </div>
         <div id="articleScroll" tabindex="0">

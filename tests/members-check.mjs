@@ -12,7 +12,9 @@ for (const f of manifest.background.scripts)
 const storage = {};
 let account = "alice",
   posts = 0,
-  failPost = false;
+  failPost = false,
+  statusLike = false,
+  statusRequests = 0;
 const listeners = [];
 const browser = {
   runtime: {
@@ -48,6 +50,19 @@ const ctx = vm.createContext({
   setTimeout,
   clearTimeout,
   fetch: async (url, opts = {}) => {
+    if (url.endsWith("/v3/notes/nstatus")) {
+      statusRequests++;
+      const liked = statusLike;
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            ...(typeof liked === "boolean" ? { is_liked: liked } : {}),
+            user: { urlname: "bob" },
+          },
+        }),
+      };
+    }
     if (url.includes("/note_comments?")) {
       const page = Number(new URL(url).searchParams.get("page"));
       return {
@@ -87,6 +102,37 @@ for (const file of manifest.background.scripts)
 vm.runInContext(fs.readFileSync("members/reader/model.js", "utf8"), ctx);
 const M = ctx.NeroMemberModel,
   A = ctx.NeroAppApiCore;
+// Exercise the built runNoteOperation/runStatusApi path, not a mocked helper.
+// A refreshed feed must see a newly added like even while the status cache lives.
+const statusUrl = "https://note.com/bob/n/nstatus";
+assert.equal(
+  (await A.noteAction("status", { articleUrl: statusUrl, force: true })).liked,
+  false,
+);
+assert.equal(statusRequests, 1);
+statusLike = true;
+const cachedStatus = await A.noteAction("status", { articleUrl: statusUrl });
+assert.equal(cachedStatus.liked, false);
+assert.equal(cachedStatus.cached, true);
+assert.equal(statusRequests, 1, "the fixture must exercise a live cache entry");
+assert.equal(
+  (await A.noteAction("status", { articleUrl: statusUrl, force: true })).liked,
+  true,
+);
+assert.equal(statusRequests, 2, "force must bypass the cached unliked status");
+statusLike = undefined;
+const unknownStatus = await A.noteAction("status", {
+  articleUrl: statusUrl,
+  force: true,
+});
+assert.equal(statusRequests, 3);
+assert.equal(unknownStatus.ok, false);
+assert.equal(unknownStatus.code, "status_api_failed");
+assert.equal(
+  unknownStatus.liked,
+  undefined,
+  "missing is_liked must not become false",
+);
 assert.equal(M.watchName("https://note.com/Alice/n/n123"), "alice");
 assert.equal(M.watchName("https://evil.example/alice"), "");
 assert.equal(M.watchName("javascript:alert(1)"), "");

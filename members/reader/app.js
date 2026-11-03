@@ -5,7 +5,7 @@
   let port,
     seq = 0,
     owner = "",
-    data = { watch: [], drafts: {}, uncertain: {} },
+    data = M.normalizeData(null, ""),
     rows = [],
     index = 0,
     articleSeq = 0,
@@ -13,7 +13,9 @@
     visible = 30,
     composer = null,
     sending = false,
-    scanning = false;
+    scanning = false,
+    feeding = false,
+    feedSeq = 0;
   const pending = new Map();
   function notice(text) {
     $("notice").textContent = text;
@@ -87,8 +89,8 @@
       const next = h.noteOk ? h.owner : "";
       if (next !== owner) {
         owner = next;
-        data = { watch: [], drafts: {}, uncertain: {} };
-        rows = [];
+        data = M.normalizeData(null, owner, null);
+        resetFeed();
         inbox = [];
         composer = null;
         $("composer").hidden = true;
@@ -97,7 +99,8 @@
           const stored = (await browser.storage.local.get(M.storageKey(owner)))[
             M.storageKey(owner)
           ];
-          if (stored) data = { ...data, ...stored };
+          data = M.normalizeData(stored, owner);
+          await save();
         }
         renderWatch();
         renderInbox();
@@ -132,15 +135,39 @@
     b.addEventListener("click", fn);
     return b;
   }
+  function resetFeed() {
+    feedSeq++;
+    if (feeding) rpc("cancel_job", { kind: "watch_feed" }).catch(() => {});
+    rows = [];
+    index = 0;
+    renderArticle();
+    $("feedStatus").textContent =
+      "1人の直近3記事からスキ済みを除き、ランダムに表示します。";
+  }
   function renderWatch() {
-    $("watchCount").textContent = String(data.watch.length);
+    const list = M.activeList(data);
+    $("watchSelect").replaceChildren();
+    for (const item of data.lists) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = item.name + "（" + item.users.length + "人）";
+      option.selected = item.id === list.id;
+      $("watchSelect").append(option);
+    }
+    $("watchCount").textContent = String(list.users.length);
+    $("readerListName").textContent = list.name + " / RANDOM";
+    $("listStatus").textContent =
+      `登録 ${list.users.length}人` +
+      (list.pending.length ? `・ID未照合 ${list.pending.length}人` : "") +
+      " / 全11リスト";
     $("watchList").replaceChildren();
-    data.watch.forEach((name) => {
+    list.users.forEach((name) => {
       const li = document.createElement("li"),
         label = document.createElement("span");
       label.textContent = "@" + name;
       const remove = button("×", async () => {
-        data.watch = data.watch.filter((x) => x !== name);
+        list.users = list.users.filter((x) => x !== name);
+        resetFeed();
         await save();
         renderWatch();
       });
@@ -148,58 +175,193 @@
       li.append(label, remove);
       $("watchList").append(li);
     });
+    $("pendingMembers").replaceChildren();
+    list.pending.forEach((member, at) => {
+      const li = document.createElement("li"),
+        label = document.createElement("span");
+      label.textContent = member.name + "（ID未照合） ";
+      li.append(
+        label,
+        button("IDを登録", async () => {
+          if (!requireOwner()) return;
+          const input = prompt(member.name + "さんのnoteユーザーIDまたはURL");
+          if (input === null) return;
+          const name = M.watchName(input);
+          if (!name) {
+            notice("noteのユーザーIDまたはURLを確認してください。");
+            return;
+          }
+          if (
+            !list.users.includes(name) &&
+            list.users.length >= M.MAX_CREATORS
+          ) {
+            notice("1リストは200人までです。");
+            return;
+          }
+          if (!list.users.includes(name)) list.users.push(name);
+          list.pending.splice(at, 1);
+          resetFeed();
+          await save();
+          renderWatch();
+        }),
+      );
+      $("pendingMembers").append(li);
+    });
   }
+  $("watchSelect").onchange = async () => {
+    if (!requireOwner()) return;
+    data.activeListId = $("watchSelect").value;
+    resetFeed();
+    await save();
+    renderWatch();
+  };
+  $("renameList").onclick = async () => {
+    if (!requireOwner()) return;
+    const list = M.activeList(data),
+      name = prompt("リスト名（40文字以内）", list.name);
+    if (name === null) return;
+    if (!name.trim() || name.trim().length > M.MAX_NAME_LENGTH) {
+      notice("リスト名は1〜40文字で入力してください。");
+      return;
+    }
+    list.name = name.trim();
+    await save();
+    renderWatch();
+  };
+  $("importList").onclick = () => {
+    if (requireOwner()) $("watchFile").click();
+  };
+  $("watchFile").onchange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const account = owner;
+    try {
+      if (!requireOwner()) return;
+      if (file.size > 128 * 1024)
+        throw new Error("リストファイルは128KB以下にしてください。");
+      const input = JSON.parse(await file.text());
+      if (owner !== account) return;
+      const requested = input?.list?.id;
+      const targetId = data.lists.some((l) => l.id === requested)
+        ? requested
+        : data.activeListId;
+      data = M.importList(data, input, { targetId, merge: true });
+      resetFeed();
+      await save();
+      renderWatch();
+      notice(M.activeList(data).name + "を読み込みました。");
+    } catch (e) {
+      notice(e.message || "ファイルを読み込めませんでした。");
+    } finally {
+      e.target.value = "";
+    }
+  };
+  $("exportList").onclick = () => {
+    if (!requireOwner()) return;
+    const list = M.activeList(data),
+      blob = new Blob(
+        [
+          JSON.stringify(
+            { format: "nero-watchlist", version: 1, owner, list },
+            null,
+            2,
+          ),
+        ],
+        { type: "application/json" },
+      );
+    const url = URL.createObjectURL(blob),
+      a = document.createElement("a");
+    a.href = url;
+    a.download = "nero-watchlist-" + list.id + ".json";
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   $("watchForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!requireOwner()) return;
-    const name = M.watchName($("watchInput").value);
+    const list = M.activeList(data),
+      name = M.watchName($("watchInput").value);
     if (!name) {
       notice(
         "noteのユーザー名か、https://note.com/ から始まるURLを入力してください。",
       );
       return;
     }
-    if (data.watch.length >= 200) {
+    if (!list.users.includes(name) && list.users.length >= M.MAX_CREATORS) {
       notice("ウォッチリストは200人まで登録できます。");
       return;
     }
-    if (!data.watch.includes(name)) data.watch.push(name);
+    if (!list.users.includes(name)) list.users.push(name);
+    resetFeed();
     await save();
     $("watchInput").value = "";
     renderWatch();
   });
   $("refreshFeed").onclick = async () => {
-    if (!requireOwner()) return;
-    const account = owner;
+    if (!requireOwner() || feeding) return;
+    const list = M.activeList(data);
+    if (!list.users.length) {
+      notice("ユーザーを追加するか、リストファイルを読み込んでください。");
+      return;
+    }
+    const account = owner,
+      listId = list.id,
+      token = ++feedSeq;
+    feeding = true;
     $("refreshFeed").disabled = true;
-    $("feedStatus").textContent = "新着記事を取得しています…";
+    $("cancelFeed").hidden = false;
+    $("feedProgress").hidden = false;
+    rows = [];
+    index = 0;
+    renderArticle();
+    $("feedStatus").textContent = "記事を取得しています…";
     try {
       const r = await rpc(
-        "note_action",
-        { noteAction: "creator_latest_batch", creators: data.watch },
-        null,
-        120000,
+        "watch_feed",
+        { creators: [...list.users], expectedAccount: account },
+        (p) => {
+          if (token !== feedSeq) return;
+          $("feedStatus").textContent = p.message;
+          $("feedProgress").max = Math.max(1, p.total || 1);
+          $("feedProgress").value = p.completed || 0;
+        },
+        3600000,
       );
-      if (owner !== account) return;
-      rows = (r.items || [])
-        .filter((r) => M.articleUrl(r.url))
-        .sort(
-          (a, b) =>
-            (Date.parse(b.publishAt) || 0) - (Date.parse(a.publishAt) || 0),
-        );
+      if (
+        owner !== account ||
+        data.activeListId !== listId ||
+        token !== feedSeq
+      )
+        return;
+      rows = (r.items || []).filter(
+        (row) => M.articleUrl(row.url) && row.liked === false,
+      );
       index = 0;
       renderArticle();
       $("feedStatus").textContent =
-        `${rows.length}件取得` +
-        (r.failed?.length
-          ? ` / ${r.failed.length}人は記事なし・取得失敗。再取得できます。`
+        `${r.cancelled ? "中断：" : ""}${rows.length}件をランダム表示 / スキ済み ${r.likedCount || 0}件を除外` +
+        (r.statusFailedCount
+          ? ` / スキ状態不明 ${r.statusFailedCount}件を除外`
+          : "") +
+        (r.failedCreators?.length
+          ? ` / 取得失敗 ${r.failedCreators.length}人`
+          : "") +
+        (r.emptyCreators?.length
+          ? ` / 記事なし ${r.emptyCreators.length}人`
           : "");
     } catch (e) {
-      $("feedStatus").textContent = e.message;
+      if (token === feedSeq) $("feedStatus").textContent = e.message;
     } finally {
+      feeding = false;
       $("refreshFeed").disabled = false;
+      $("cancelFeed").hidden = true;
+      $("feedProgress").hidden = true;
     }
   };
+  $("cancelFeed").onclick = () =>
+    rpc("cancel_job", { kind: "watch_feed" }).catch((e) => notice(e.message));
   function safeLink(value) {
     try {
       const u = new URL(value, "https://note.com/");
@@ -309,7 +471,11 @@
     $("cover").hidden = true;
     $("articleScroll").scrollTop = 0;
     $("like").textContent = "♡ スキ";
-    rpc("note_action", { noteAction: "status", articleUrl: row.url })
+    rpc("note_action", {
+      noteAction: "status",
+      articleUrl: row.url,
+      force: true,
+    })
       .then((r) => {
         if (token !== articleSeq) return;
         row.liked = !!r.liked;
@@ -450,6 +616,7 @@
         button("記事を読む", () => {
           const url = M.articleUrl(item.articleUrl);
           if (!url) return;
+          resetFeed();
           rows = [{ url, key: url.split("/n/")[1], name: item.articleTitle }];
           index = 0;
           renderArticle();
@@ -631,7 +798,7 @@
       "確認済み。送信済みの場合は再送しないでください。";
   };
   $("clearData").onclick = async () => {
-    if (!requireOwner() || sending || scanning) return;
+    if (!requireOwner() || sending || scanning || feeding) return;
     if (
       !confirm(
         "@" +
@@ -650,7 +817,7 @@
       "nero.app.inbox.v4." + owner,
       "nero.app.priority.v2." + owner,
     ]);
-    data = { watch: [], drafts: {}, uncertain: {} };
+    data = M.normalizeData(null, owner, null);
     inbox = [];
     rows = [];
     composer = null;

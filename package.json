@@ -12,7 +12,7 @@
     "package:extension": "npm run materialize && bash scripts/package-extension.sh",
     "materialize": "node scripts/materialize-sources.mjs",
     "build:members": "npm run materialize && node scripts/build-members.mjs",
-    "check:members": "npm run build:members && node tests/members-check.mjs",
+    "check:members": "npm run build:members && node tests/members-check.mjs && node tests/watchlists-check.mjs && node tests/member-feed-check.mjs",
     "package:members": "npm run check:members && node scripts/package-members.mjs"
   }
 }
