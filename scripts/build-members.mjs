@@ -100,6 +100,8 @@ fs.writeFileSync(
   router.replace(
     route,
     "if(action==='watch_feed')return globalThis.NeroMemberFeed.fetch(port,id,args);" +
+      "if(action==='comment_like')return globalThis.NeroAppInbox.like(args);" +
+      "if(action==='pending_comment_likes')return globalThis.NeroAppInbox.pendingLikes(args.owner);" +
       route,
   ),
 );

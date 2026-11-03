@@ -15,23 +15,46 @@ console.log(
 // Include readable, verified materialized sources for Mozilla's source review.
 const sourceDir = "dist/mozilla-source";
 fs.rmSync(sourceDir, { recursive: true, force: true });
-const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
-  .split("\0")
-  .filter((file) => file && !file.startsWith("downloads/"));
-for (const file of [
-  ...tracked,
-  "extension/background.js",
-  "extension/note-bridge.js",
-  "extension/reader-bridge.js",
-  "src/worker.js",
-]) {
+// Explicit source roots also work from Mozilla's extracted source archive,
+// which has no .git directory. Never sweep downloads or private roster files.
+function copySource(file) {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink())
+    throw new Error("Source archive refuses symlink: " + file);
+  if (stat.isDirectory()) {
+    for (const name of fs.readdirSync(file).sort()) {
+      if (
+        ["node_modules", ".git", "dist", "downloads"].includes(name) ||
+        name === ".dev.vars" ||
+        /^\.env(?:\.|$)/.test(name)
+      )
+        continue;
+      copySource(path.join(file, name));
+    }
+    return;
+  }
   const dest = path.join(sourceDir, file);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(file, dest);
 }
+for (const file of [
+  ".gitignore",
+  "LICENSE",
+  "README.md",
+  "SECURITY.md",
+  "package.json",
+  "docs",
+  "extension",
+  "members",
+  "packed",
+  "scripts",
+  "tests",
+  "src/worker.js",
+])
+  copySource(file);
 fs.writeFileSync(
   sourceDir + "/MOZILLA_BUILD.txt",
-  `Build prerequisites: Node.js 22+, npm, git, zip. No npm dependencies.\nRun npm run package:members from the repository root.\nInstallable package: dist/nero-swipe-reader-${version}-unsigned.zip\nSource tree includes packed originals and readable materialized JavaScript.\nIf using this source archive without .git, run npm run build:members, then zip the contents of dist/firefox-members.\n`,
+  `Build prerequisites: Node.js 22+, npm, zip. No npm dependencies.\nRun npm run package:members from the source root (a Git checkout is not required).\nInstallable package: dist/nero-swipe-reader-${version}-unsigned.zip\nSource tree includes packed originals and readable materialized JavaScript.\nTo build just the extension files, run npm run build:members.\n`,
 );
 const sourceTarget = `nero-swipe-reader-${version}-source.zip`;
 fs.rmSync("dist/" + sourceTarget, { force: true });

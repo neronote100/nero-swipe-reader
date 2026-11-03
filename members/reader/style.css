@@ -381,6 +381,27 @@ textarea {
   font-size: 12px;
   line-height: 1.7;
 }
+.reply-like-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.8;
+}
+.reply-like-option input {
+  width: auto;
+  flex-shrink: 0;
+}
+#pendingLikesPanel {
+  margin: 20px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--sage);
+}
+#pendingLikesPanel h3 {
+  margin: 0;
+  font-size: 14px;
+}
 #moreInbox {
   width: 100%;
 }

@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const A = globalThis.NeroAppApiCore;
-  A.C.VERSION = "0.3.0";
+  A.C.VERSION = "0.3.1";
   A.C.EXCLUDE_LIKED_COMMENTS = true;
   A.isReaderPort = (port) =>
     port?.sender?.id === browser.runtime.id &&
@@ -19,10 +19,11 @@
         "creator_latest_batch",
         "like",
         "comment",
+        "comment_like",
       ].includes(action)
     )
       return { ok: false, message: "対応していない操作です。" };
-    if (["like", "comment"].includes(action)) {
+    if (["like", "comment", "comment_like"].includes(action)) {
       const acc = await original("account");
       if (
         !acc?.ok ||
@@ -35,6 +36,50 @@
           message:
             "ログイン中のアカウントが変わりました。接続を確認してください。",
         };
+    }
+    if (action === "comment_like") {
+      // Ignore cached flags: a like must target the specific original comment.
+      const result = await original(action, {
+        ...args,
+        replyTarget: { ...args.replyTarget, liked: false },
+      });
+      if (result?.ok) return result;
+      if (
+        result?.status === 409 ||
+        [
+          "comment_like_result_unknown",
+          "comment_like_api_unavailable",
+        ].includes(result?.code)
+      ) {
+        // A lost response or duplicate rejection is not proof of success.
+        // Confirm the current viewer's flag with a fresh read, never repost.
+        const comments = await original("comments", {
+          articleUrl: args.articleUrl,
+          summaryOnly: false,
+        });
+        const account = await original("account");
+        const expected = String(args.expectedAccount || "").toLowerCase();
+        if (
+          account?.ok &&
+          account.urlname?.toLowerCase() === expected &&
+          comments?.ok &&
+          String(comments.viewerUrlname || "").toLowerCase() === expected &&
+          comments.comments?.some(
+            (c) =>
+              String(c.key) === String(args.replyTarget?.commentKey) &&
+              c.viewerLiked === true,
+          )
+        )
+          return {
+            ok: true,
+            action: "comment_like",
+            liked: true,
+            already: true,
+            verified: true,
+            source: "note_comments_verified",
+          };
+      }
+      return result;
     }
     if (action !== "comment") return original(action, args);
     if (commentBusy)
@@ -92,11 +137,17 @@
       // The server result may be unknown after a network failure. Keep the
       // durable marker across tabs and background restarts in that case.
       const result = await original(action, args);
-      if (result?.ok)
-        await browser.storage.local.set({
-          [id]: { at: Date.now(), sent: true },
-        });
-      else if (
+      if (result?.ok) {
+        try {
+          await browser.storage.local.set({
+            [id]: { at: Date.now(), sent: true },
+          });
+        } catch {
+          // The server confirmed the comment. A local receipt failure must
+          // never turn that success into an invitation to post it again.
+          return { ...result, commentSent: true, receiptSaved: false };
+        }
+      } else if (
         [
           "login_required",
           "invalid_comment",

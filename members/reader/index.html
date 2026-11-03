@@ -130,6 +130,12 @@
         <progress id="progress" hidden></progress>
         <div id="inboxList"></div>
         <button id="moreInbox" hidden>さらに30件</button>
+        <section id="pendingLikesPanel" hidden>
+          <h3>スキ未完了 <span id="pendingLikesCount">0</span></h3>
+          <p class="muted" id="pendingLikeStatus" role="status"></p>
+          <div id="pendingLikesList"></div>
+          <button id="morePendingLikes" hidden>さらに30件</button>
+        </section>
         <section id="composer" hidden>
           <p class="eyebrow" id="composerKind">REPLY</p>
           <h3 id="composerTitle"></h3>
@@ -144,11 +150,16 @@
           <p class="muted">
             <span id="draftCount">0</span> / 500 · 下書きは端末に保存
           </p>
+          <label id="replyLikeOption" class="reply-like-option" hidden>
+            <input id="replyLike" type="checkbox" checked />
+            返信先のコメントにもスキを送る
+          </label>
           <div class="input-row">
             <button id="closeComposer">閉じる</button
             ><button id="send" class="primary">送信する</button>
           </div>
           <p id="sendStatus" role="status"></p>
+          <button id="composerLikeOnly" hidden>スキのみ再試行</button>
           <button id="resolveUnknown" hidden>noteで結果を確認しました</button>
         </section>
       </aside>

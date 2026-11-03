@@ -10,6 +10,9 @@
     index = 0,
     articleSeq = 0,
     inbox = [],
+    pendingCommentLikes = [],
+    pendingLikeVisible = 30,
+    unknownReplyCount = 0,
     visible = 30,
     composer = null,
     sending = false,
@@ -86,12 +89,17 @@
     $("connect").disabled = true;
     try {
       const h = await rpc("health");
+      // A diagnosis started earlier must not replace the account mid-send.
+      if (sending || scanning) return;
       const next = h.noteOk ? h.owner : "";
       if (next !== owner) {
         owner = next;
         data = M.normalizeData(null, owner, null);
         resetFeed();
         inbox = [];
+        pendingCommentLikes = [];
+        unknownReplyCount = 0;
+        renderPendingLikes();
         composer = null;
         $("composer").hidden = true;
         renderArticle();
@@ -112,6 +120,7 @@
         const r = await rpc("inbox_status", { owner });
         inbox = r.items || [];
         renderInbox();
+        await refreshPendingLikes();
         notice("");
       } else
         notice(
@@ -613,6 +622,9 @@
         button("返信を書く", () =>
           openComposer({ ...item, replyTarget: c.replyTarget, kind: "reply" }),
         ),
+        button("♡ コメントにスキ", (e) =>
+          sendCommentLike(item, e.currentTarget),
+        ),
         button("記事を読む", () => {
           const url = M.articleUrl(item.articleUrl);
           if (!url) return;
@@ -626,6 +638,126 @@
     });
     $("moreInbox").hidden = inbox.length <= visible;
   }
+  function renderPendingLikes(message = "") {
+    $("pendingLikesCount").textContent = String(pendingCommentLikes.length);
+    $("pendingLikesPanel").hidden =
+      !pendingCommentLikes.length && !unknownReplyCount && !message;
+    $("pendingLikeStatus").textContent =
+      message ||
+      (unknownReplyCount
+        ? `送信結果が未確認の返信が${unknownReplyCount}件あります。noteで確認してください。`
+        : "ここではスキだけを送信します。返信本文は再送しません。");
+    $("pendingLikesList").replaceChildren();
+    pendingCommentLikes.slice(0, pendingLikeVisible).forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "comment-card";
+      const title = document.createElement("h3"),
+        body = document.createElement("p");
+      title.textContent =
+        (item.replySent ? "返信済み：" : "") +
+        (item.articleTitle || "コメントへのスキ");
+      body.textContent = item.replyTarget?.body || "";
+      const open = document.createElement("a");
+      open.href = M.articleUrl(item.articleUrl);
+      open.target = "_blank";
+      open.rel = "noreferrer noopener";
+      open.textContent = "noteで確認 ↗";
+      card.append(
+        title,
+        body,
+        button("スキのみ再試行", (e) => sendCommentLike(item, e.currentTarget)),
+        open,
+      );
+      $("pendingLikesList").append(card);
+    });
+    $("morePendingLikes").hidden =
+      pendingCommentLikes.length <= pendingLikeVisible;
+  }
+  async function refreshPendingLikes() {
+    if (!owner) {
+      pendingCommentLikes = [];
+      unknownReplyCount = 0;
+      renderPendingLikes();
+      return;
+    }
+    const account = owner;
+    try {
+      const result = await rpc("pending_comment_likes", { owner: account });
+      if (owner !== account) return;
+      pendingCommentLikes = result.items || [];
+      unknownReplyCount = result.unknownReplyCount || 0;
+      renderPendingLikes();
+    } catch (e) {
+      if (owner === account) renderPendingLikes(e.message);
+    }
+  }
+  async function sendCommentLike(item, control) {
+    if (!requireOwner() || sending) return;
+    const account = owner,
+      inboxKey = item.inboxKey || item.key;
+    sending = true;
+    if (control) control.disabled = true;
+    try {
+      await rpc(
+        "comment_like",
+        item.id
+          ? { owner: account, pendingId: item.id }
+          : {
+              owner: account,
+              articleUrl: item.articleUrl,
+              articleTitle: item.articleTitle,
+              inboxKey,
+              replyTarget: item.replyTarget || item.comment?.replyTarget,
+            },
+        null,
+        45000,
+      );
+      if (owner !== account) return;
+      inbox = inbox.filter((row) => row.key !== inboxKey);
+      if (item.replySent && data.uncertain[inboxKey]) {
+        delete data.uncertain[inboxKey];
+        await save().catch(() => {});
+      }
+      if (
+        composer?.articleUrl === item.articleUrl &&
+        composer.replyTarget?.commentKey ===
+          (item.replyTarget || item.comment?.replyTarget)?.commentKey
+      ) {
+        $("composerLikeOnly").hidden = true;
+        $("sendStatus").textContent = composer.replySent
+          ? "返信とスキを送信しました。"
+          : "コメントにスキしました。";
+      }
+      notice("コメントにスキしました。");
+    } catch (e) {
+      notice(e.message);
+    } finally {
+      sending = false;
+      if (control) control.disabled = false;
+      renderInbox();
+      await refreshPendingLikes();
+    }
+  }
+  $("morePendingLikes").onclick = () => {
+    pendingLikeVisible += 30;
+    renderPendingLikes();
+  };
+  $("composerLikeOnly").onclick = (e) => {
+    if (composer)
+      sendCommentLike(
+        { ...composer, inboxKey: composer.inboxKey || composer.key },
+        e.currentTarget,
+      );
+  };
+  function updateSendLabel() {
+    $("send").textContent =
+      composer?.kind === "reply"
+        ? $("replyLike").checked
+          ? "返信＋スキを送信"
+          : "返信する"
+        : "コメントを送信";
+  }
+  $("replyLike").onchange = updateSendLabel;
   $("moreInbox").onclick = () => {
     visible += 30;
     renderInbox();
@@ -675,6 +807,10 @@
     composer = { ...c, owner };
     $("composer").hidden = false;
     $("composerKind").textContent = c.kind === "reply" ? "REPLY" : "COMMENT";
+    $("replyLikeOption").hidden = c.kind !== "reply";
+    $("replyLike").checked = true;
+    $("composerLikeOnly").hidden = true;
+    updateSendLabel();
     $("composerTitle").textContent = c.articleTitle || "";
     $("context").textContent = c.comment?.body || "この記事にコメントします。";
     $("draft").value = data.drafts[M.draftKey(c)] || "";
@@ -709,7 +845,10 @@
   };
   $("send").onclick = async () => {
     if (!composer || sending || !requireOwner()) return;
+    const composerRef = composer,
+      sendData = data;
     const c = { ...composer },
+      account = c.owner,
       key = M.draftKey(c),
       text = $("draft").value.trim();
     if (!text || text.length > 500) return;
@@ -717,25 +856,35 @@
     sending = true;
     $("send").disabled = true;
     $("draft").disabled = true;
+    $("replyLike").disabled = true;
     $("sendStatus").textContent = "送信しています…";
     // Persist BEFORE posting. A closed tab or lost Port must never invite an
     // automatic retry of a comment whose server result is unknown.
-    data.uncertain[key] = true;
+    sendData.uncertain[key] = true;
+    const saveSendData = () =>
+      browser.storage.local.set({ [M.storageKey(account)]: sendData });
     try {
-      await save();
+      await saveSendData();
+      if (owner !== account || composer !== composerRef)
+        throw Object.assign(
+          new Error("アカウントが変わったため送信を中断しました。"),
+          { result: { code: "account_changed" } },
+        );
       const r = await rpc(
         c.kind === "reply" ? "reply_comment" : "note_action",
         c.kind === "reply"
           ? {
-              owner,
+              owner: account,
               articleUrl: c.articleUrl,
+              articleTitle: c.articleTitle,
+              likeComment: $("replyLike").checked,
               comment: text,
               replyTarget: c.replyTarget,
               inboxKey: c.inboxKey || c.key,
             }
           : {
               noteAction: "comment",
-              expectedAccount: owner,
+              expectedAccount: account,
               articleUrl: c.articleUrl,
               comment: text,
             },
@@ -743,17 +892,43 @@
         45000,
       );
       if (!r.ok) throw new Error("送信結果を確認できませんでした。");
-      delete data.uncertain[key];
-      delete data.drafts[key];
-      await save();
-      if (c.kind === "reply") {
-        inbox = inbox.filter((x) => x.key !== c.key);
-        renderInbox();
+      // A successful reply remains successful when the separate like fails.
+      // Clear the text before saving locally so a storage error cannot invite a repost.
+      delete sendData.uncertain[key];
+      delete sendData.drafts[key];
+      if (owner !== account || composer !== composerRef) {
+        await saveSendData().catch(() => {});
+        return;
       }
       $("draft").value = "";
       $("draftCount").textContent = "0";
-      $("sendStatus").textContent = "送信しました。";
-      notice("送信しました。");
+      $("resolveUnknown").hidden = true;
+      if (c.kind === "reply") {
+        composer.replySent = true;
+        inbox = inbox.filter((x) => x.key !== c.key);
+        renderInbox();
+        $("composerLikeOnly").hidden = !r.likePending;
+      }
+      const message =
+        (r.likePending
+          ? r.message
+          : c.kind === "reply"
+            ? r.liked
+              ? "返信とスキを送信しました。"
+              : "返信しました。"
+            : "コメントを送信しました。") +
+        (r.receiptSaved === false
+          ? " 送信済み情報を端末に保存できませんでした。返信は再送しないでください。"
+          : "");
+      $("sendStatus").textContent = message;
+      notice(message);
+      try {
+        await saveSendData();
+      } catch {
+        $("sendStatus").textContent =
+          message +
+          " 端末の保存情報を更新できませんでした。返信は再送しないでください。";
+      }
     } catch (e) {
       const definitive =
         e.result &&
@@ -762,21 +937,29 @@
           "login_required",
           "invalid_comment",
           "invalid_reply",
+          "invalid_comment_target",
+          "pending_likes_storage_failed",
           "busy",
           "throttled",
           "comment_api_rejected",
           "comment_acknowledgement",
         ].includes(e.result.code);
       if (definitive) {
-        delete data.uncertain[key];
-        await save();
+        delete sendData.uncertain[key];
+        await saveSendData().catch(() => {});
       }
-      $("sendStatus").textContent = e.message;
-      $("resolveUnknown").hidden = !data.uncertain[key];
+      if (owner === account && composer === composerRef) {
+        $("sendStatus").textContent = e.message;
+        $("resolveUnknown").hidden = !sendData.uncertain[key];
+      }
     } finally {
       sending = false;
       $("draft").disabled = false;
-      $("send").disabled = !!data.uncertain[key];
+      $("replyLike").disabled = false;
+      $("send").disabled = composer
+        ? !!data.uncertain[M.draftKey(composer)]
+        : false;
+      await refreshPendingLikes();
     }
   };
   $("resolveUnknown").onclick = async () => {
@@ -816,9 +999,13 @@
       M.storageKey(owner),
       "nero.app.inbox.v4." + owner,
       "nero.app.priority.v2." + owner,
+      "nero.members.commentLikes.v1." + owner,
     ]);
     data = M.normalizeData(null, owner, null);
     inbox = [];
+    pendingCommentLikes = [];
+    unknownReplyCount = 0;
+    renderPendingLikes();
     rows = [];
     composer = null;
     $("composer").hidden = true;
