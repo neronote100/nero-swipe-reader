@@ -133,7 +133,7 @@
         notice("");
       } else
         notice(
-          "同じFirefoxでnoteにログインしてから「再確認」を押してください。",
+          "このブラウザーでnoteにログインしてから「再確認」を押してください。",
         );
     } catch (e) {
       notice(e.message);

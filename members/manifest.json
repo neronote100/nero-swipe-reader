@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "NERO Swipe Reader",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "ウォッチリストをスワイプで読み、noteのログイン状態でスキ・コメント・未返信管理ができるメンバー向けリーダー。",
   "permissions": ["storage", "https://note.com/*"],
   "background": {
@@ -30,5 +30,5 @@
     },
     "gecko_android": { "strict_min_version": "142.0" }
   },
-  "content_security_policy": "script-src 'self'; object-src 'none'; connect-src https://note.com; img-src https: data:; style-src 'self'; frame-src 'none'"
+  "content_security_policy": "script-src 'self'; object-src 'none'; connect-src https://note.com; img-src 'self' https: data:; style-src 'self'; frame-src 'none'"
 }

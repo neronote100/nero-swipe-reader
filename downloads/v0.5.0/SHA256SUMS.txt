@@ -1,0 +1,4 @@
+dd0624ad0548c48402dc8e0c5b114e641affb5fd2bab84a73e8bb2419af32114  nero-swipe-reader-0.5.0-chrome.zip
+89e4158d73a215e0233ec88b0ad72831c8fa7431dd0fa42d5423062b6f8a30d5  nero-swipe-reader-0.5.0-chrome-source.zip
+26bea5ab9ec0dfa2014cae2d1f5c143fbbf2d600afac9b1a453aab3eb3664acb  nero-swipe-reader-0.5.0-unsigned.zip
+d5be80adb9ba5c857b41126cc2216475f05ac84a2b2afb7bc2b5f17ed8e48ba3  nero-swipe-reader-0.5.0-source.zip

@@ -13,6 +13,9 @@
     "materialize": "node scripts/materialize-sources.mjs",
     "build:members": "npm run materialize && node scripts/build-members.mjs",
     "check:members": "npm run build:members && node tests/members-check.mjs && node tests/watchlists-check.mjs && node tests/member-feed-check.mjs && node tests/comment-likes-check.mjs && node tests/comment-like-integration-check.mjs && node tests/comment-likes-ui-check.mjs && node tests/feed-modes-ui-check.mjs && node tests/member-article-check.mjs && node tests/article-body-check.mjs && node tests/article-navigation-ui-check.mjs",
-    "package:members": "npm run check:members && node scripts/package-members.mjs"
+    "package:members": "npm run check:members && node scripts/package-members.mjs",
+    "build:chrome": "npm run materialize && node scripts/build-chrome.mjs",
+    "check:chrome": "npm run build:chrome && node tests/chrome-platform-check.mjs && node tests/chrome-package-check.mjs && node tests/chrome-runtime-integration-check.mjs",
+    "package:chrome": "npm run check:members && npm run check:chrome && node scripts/package-chrome.mjs"
   }
 }

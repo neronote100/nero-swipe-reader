@@ -20,6 +20,15 @@
 body {
   margin: 0;
 }
+.chrome-startup {
+  max-width: 680px;
+  margin: 12vh auto;
+  padding: 28px;
+  line-height: 1.9;
+}
+.chrome-startup h1 {
+  font-size: 24px;
+}
 button,
 input,
 textarea {

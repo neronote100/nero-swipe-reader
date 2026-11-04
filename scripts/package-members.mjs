@@ -1,14 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { writeZipFromDirectory } from "./zip-utils.mjs";
 const version = JSON.parse(
   fs.readFileSync("members/manifest.json", "utf8"),
 ).version;
 const target = `nero-swipe-reader-${version}-unsigned.zip`;
 fs.rmSync("dist/" + target, { force: true });
-execFileSync("zip", ["-qr", "../" + target, "."], {
-  cwd: "dist/firefox-members",
-});
+writeZipFromDirectory("dist/firefox-members", "dist/" + target);
 console.log(
   "Created dist/" + target + " — Mozilla署名前の開発用パッケージです。",
 );
@@ -46,6 +44,7 @@ for (const file of [
   "docs",
   "extension",
   "members",
+  "chrome",
   "packed",
   "scripts",
   "tests",
@@ -54,11 +53,11 @@ for (const file of [
   copySource(file);
 fs.writeFileSync(
   sourceDir + "/MOZILLA_BUILD.txt",
-  `Build prerequisites: Node.js 22+, npm, zip. No npm dependencies.\nRun npm run package:members from the source root (a Git checkout is not required).\nInstallable package: dist/nero-swipe-reader-${version}-unsigned.zip\nSource tree includes packed originals and readable materialized JavaScript.\nTo build just the extension files, run npm run build:members.\n`,
+  `Build prerequisites: Node.js 22+ and npm. No npm dependencies or external ZIP executable.\nRun npm run package:members from the source root (a Git checkout is not required).\nInstallable package: dist/nero-swipe-reader-${version}-unsigned.zip\nSource tree includes packed originals and readable materialized JavaScript.\nTo build just the extension files, run npm run build:members.\nChrome build: node scripts/build-chrome.mjs\n`,
 );
 const sourceTarget = `nero-swipe-reader-${version}-source.zip`;
 fs.rmSync("dist/" + sourceTarget, { force: true });
-execFileSync("zip", ["-qr", "../" + sourceTarget, "."], { cwd: sourceDir });
+writeZipFromDirectory(sourceDir, "dist/" + sourceTarget);
 console.log(
   "Created dist/" + sourceTarget + " — Mozilla source review archive",
 );

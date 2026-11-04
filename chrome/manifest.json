@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "NERO Swipe Reader",
+  "version": "0.5.0",
+  "description": "ウォッチリストをスワイプで読み、noteのログイン状態でスキ・コメント・未返信管理ができるメンバー向けリーダー。",
+  "minimum_chrome_version": "120",
+  "permissions": ["storage"],
+  "host_permissions": ["https://note.com/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "NERO Swipe Readerを開く",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqAjl7zgBRgsb++3MM7gvjY3PonkRYvSdTqhaBq1gerkZkQvxL26PQ+b0ITSx7yFiGVPQhIlCT1sH9xa1SAZgWXC6EJSKe2gnCa8PhPKnx0YoMpqRCjt1plYNbDyP8/qpgO/ir8c595eBE59Zb5FwguZbLdmVXIfUkaMtoSZJx5eqDjT/gnWMiXmLuxlsMbFR/KG7VaytULhxFbVQBSXiISCTaSqsSea6obJKY7VxseBMeNOTQhJeZoywU05uU0NgXJZNRXwQrAiwA+OwAFrZZ909qP5S+T8YoPtpcQLHsZjJuL7spcB3mNu1o56niFM97D9p7anqDmXyC/HqvpVIqQIDAQAB",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src https://note.com; img-src 'self' https: data:; style-src 'self'; frame-src 'none'"
+  }
+}

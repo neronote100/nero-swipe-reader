@@ -1,6 +1,6 @@
-# NERO Swipe Reader — Firefox メンバー版
+# NERO Swipe Reader — Firefox / Chrome メンバー版
 
-noteのウォッチリストをスワイプしながら読み、記事を開いたままコメントに返信できるFirefox拡張です。画面・スクリプトは拡張内に同梱し、GitHub Pagesや専用サーバーを必要としません。
+noteのウォッチリストをスワイプしながら読み、記事を開いたままコメントに返信できるブラウザー拡張です。Firefox版とPC向けChrome版があり、画面・スクリプトは拡張内に同梱しています。GitHub Pagesや専用サーバーを必要としません。
 
 ## できること
 
@@ -8,14 +8,28 @@ noteのウォッチリストをスワイプしながら読み、記事を開い�
 - 各書き手の新しい記事からスキ済みを飛ばし、未スキ記事を最大3本ずつ集めてランダム表示。スキ済みを含める切り替えにも対応。本文・画像を読み、上下スワイプ・矢印キー・前後ボタンで切り替え。
 - 深掘りモードで1人を指定し、最大50本の記事を取得。スキ済みを含めるか選択可能。
 - 記事内のリンクカードを表示。note記事はリーダー内で開き、リンク元の読んでいた位置へ戻れる。外部サイトは別タブで開く。
-- 同じFirefoxのnoteログイン状態を利用した、記事へのスキ・コメント・返信。
+- 利用中のブラウザーのnoteログイン状態を利用した、記事へのスキ・コメント・返信。
 - 自分の記事を走査し、未返信コメントを一括取得。進捗・途中保存・中断・差分更新・全件再確認に対応。
 - 記事閲覧と返信欄を並べて表示。スマートフォンでは縦に配置。下書きはアカウント別・コメント別に端末へ保存。
 - 送信前にログイン中のアカウントを再確認。通信結果が不明な投稿を自動再送せず、24時間の重複防止情報を保存。
 
 「未返信」は同じスレッドで自分の最後の返信より後に届いた他の人のコメントです。ログイン中の本人がスキ済みのコメントは、返信していなくても取得・表示対象から除外します。返信後は該当コメントを一覧から除外し、次の一括取得でスレッド全体を再判定します。
 
-## 開発用インストール
+## Chrome版の無料配布・導入
+
+配布用ZIPを解凍し、PC版Chromeの `chrome://extensions` で「デベロッパーモード」をONにして「パッケージ化されていない拡張機能を読み込む」からフォルダーを選択します。Chrome Web Store登録・Googleへの登録料・Mozilla署名は不要です。
+
+[Chrome版の導入・更新手順](docs/CHROME_INSTALL.md) / [配布ZIP](downloads/v0.5.0/nero-swipe-reader-0.5.0-chrome.zip)
+
+Chrome 120以降（最新版を推奨）のWindows・Mac・Linux向けです。Android・iPhone版Chromeには導入できません。長い取得は開いているリーダータブで実行し、同時に有効なリーダーは1つです。取得中はリーダータブを閉じず、他のタブで作業できます。更新は手動でファイルを差し替えて拡張を再読み込みします。
+
+```bash
+npm run package:chrome
+```
+
+`dist/chrome-members/`、`dist/nero-swipe-reader-0.5.0-chrome.zip`、再ビルド用の `dist/nero-swipe-reader-0.5.0-chrome-source.zip` を生成します。
+
+## Firefox版の開発用インストール
 
 ```bash
 npm run package:members
@@ -23,9 +37,9 @@ npm run package:members
 
 PC版Firefoxの `about:debugging#/runtime/this-firefox` →「一時的なアドオンを読み込む」から `dist/firefox-members/manifest.json` を選択。ツールバーの拡張アイコンでリーダーを開きます。同じFirefoxでnoteへログインして「再確認」を押してください。
 
-一時読み込みはFirefoxの再起動で解除されます。生成される `dist/nero-swipe-reader-0.4.1-unsigned.zip` はMozilla署名前の開発用です。通常のPC版・Android版Firefoxへの配布には署名済みXPIが必要です。
+一時読み込みはFirefoxの再起動で解除されます。生成される `dist/nero-swipe-reader-0.5.0-unsigned.zip` はMozilla署名前の開発用です。通常のPC版・Android版Firefoxへの配布には署名済みXPIが必要です。
 
-## メンバー配布まで
+## Firefox版のメンバー配布まで
 
 1. [配布・実機確認手順](docs/MEMBER_RELEASE.md)に沿って、PC版とAndroid版Firefoxで確認。
 2. Mozilla Add-on Developer Hubで既存アドオンの新しいバージョンとして生成ZIPを提出し、署名済みXPIを取得。初回から限定配布する場合は「このサイト以外で配布」を選択。
@@ -41,6 +55,8 @@ PC版Firefoxの `about:debugging#/runtime/this-firefox` →「一時的なアド
 npm run check          # 旧版の回帰検査
 npm run check:members  # メンバー版のビルドと動作検査
 npm run package:members
+npm run check:chrome   # Chrome版の起動・通信・生成物検査
+npm run package:chrome # 共通検査とChrome配布ZIPを生成
 ```
 
 送信処理・現在のアカウント確認・重複防止・下書き識別・スワイプ判定・接続元制限・未返信判定を、noteへ実投稿せずに検査します。
@@ -96,3 +112,12 @@ npm run package:members
 - 元の記事で既に開いた下書きの宛先は保持する。リンク先にコメントする場合はリンク先の「コメント」を押す。
 
 実際のnoteアカウントでの表示・投稿、PC／Android実機とMozilla署名は別途確認が必要。
+
+## v0.5.0 の変更
+
+- PC版Chrome向けManifest V3パッケージを追加。デベロッパーモードでZIPを解凍して無料導入できる。
+- 長時間の取得・送信処理はリーダータブで実行し、サービスワーカーの停止に依存させない。タブの終了・再読み込みで処理は停止するため、取得中は開いておく。
+- Chromeでは同じプロフィール内でリーダーを1つだけ有効にし、アイコンを押すと開いているリーダーへ戻る。複数ページから同時に投稿することを防ぐ。
+- Chrome配布用の公開キーを固定し、更新後も同じ拡張IDを保つ。更新手順と通信・保存内容を配布ZIPの `INSTALL.md` に同梱する。
+- FirefoxとChromeの画面・機能を共通のソースから生成し、ブラウザーごとのログインとローカル保存を使う。ウォッチリストはJSONで移せる。
+- ZIP生成はNode.js組込機能だけで行い、追加の圧縮ツールやGitチェックアウトを必要としない。
