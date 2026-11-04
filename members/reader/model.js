@@ -169,6 +169,11 @@ globalThis.NeroMemberModel = {
           : "castle",
       drafts: isRecord(input.drafts) ? { ...input.drafts } : {},
       uncertain: isRecord(input.uncertain) ? { ...input.uncertain } : {},
+      feedOptions: {
+        includeLiked: input.feedOptions?.includeLiked === true,
+        deepIncludeLiked: input.feedOptions?.deepIncludeLiked === true,
+        deepCreator: M.watchName(input.feedOptions?.deepCreator),
+      },
       seedVersion:
         Number.isSafeInteger(input.seedVersion) && input.seedVersion > 0
           ? input.seedVersion

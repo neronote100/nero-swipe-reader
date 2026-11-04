@@ -1,6 +1,7 @@
 "use strict";
 (() => {
   const A = globalThis.NeroAppApiCore;
+  const MAX_PAGES = 1000;
   let running = false;
 
   function creatorName(value) {
@@ -23,14 +24,21 @@
     }
   }
 
+  function newestFirst(left, right) {
+    return (
+      (Date.parse(right.publishAt || "") || 0) -
+      (Date.parse(left.publishAt || "") || 0)
+    );
+  }
+
   function randomUnit() {
     const values = new Uint32Array(1);
     crypto.getRandomValues(values);
     return values[0] / 4294967296;
   }
 
-  // Shuffle the complete eligible pool only after every creator/status task.
-  // Network response order and watchlist registration order cannot pick winners.
+  // Shuffle the complete pool after all creators finish. Neither registration
+  // order nor network response order gives a creator the first positions.
   function shuffle(items, random = randomUnit) {
     const result = items.slice();
     for (let i = result.length - 1; i > 0; i--) {
@@ -61,8 +69,22 @@
   async function fetchFeed(port, requestId, args = {}) {
     const expected = creatorName(args.expectedAccount);
     if (!expected) return accountError();
+    const mode = args.mode === "deep" ? "deep" : "watch";
+    const includeLiked = args.includeLiked === true;
+    const target = mode === "deep" ? 50 : 3;
+    const deepCreator = creatorName(args.creator);
+    if (mode === "deep" && !deepCreator) {
+      return {
+        ok: false,
+        code: "invalid_creator",
+        message: "深掘りするnoteユーザーIDを指定してください。",
+      };
+    }
     const rawCreators = Array.isArray(args.creators) ? args.creators : [];
-    const creators = [...new Set(rawCreators.map(creatorName).filter(Boolean))];
+    const creators =
+      mode === "deep"
+        ? [deepCreator]
+        : [...new Set(rawCreators.map(creatorName).filter(Boolean))];
     if (creators.length > 200) {
       return {
         ok: false,
@@ -81,135 +103,213 @@
     const token = A.jobToken("watch_feed");
     try {
       if (!(await accountMatches(expected))) return accountError();
-      const candidateGroups = new Array(creators.length);
-      const failedCreators = [];
-      const emptyCreators = [];
+      let accountChanged = false;
+      const groups = new Array(creators.length);
+      const outcomes = new Array(creators.length);
       let cursor = 0,
-        checkedCreators = 0;
-      A.progress(port, requestId, {
-        phase: "creators",
-        completed: 0,
-        total: creators.length,
-        found: 0,
-        message: `${creators.length}人の直近3記事を確認しています…`,
-      });
-
-      async function creatorWorker() {
-        while (cursor < creators.length && !token.cancelled) {
-          const position = cursor++;
-          const creator = creators[position];
-          try {
-            const page = await A.bg().fetchCreatorContentsPage(creator, 1);
-            if (!Array.isArray(page))
-              throw new Error("invalid_creator_response");
-            const seen = new Set();
-            const valid = page.filter((item) => {
-              const url = articleUrl(item?.url);
-              if (
-                !url ||
-                creatorName(new URL(url).pathname.split("/")[1]) !== creator ||
-                seen.has(url)
-              )
-                return false;
-              seen.add(url);
-              return true;
-            });
-            const latest = valid
-              .slice()
-              .sort(
-                (left, right) =>
-                  (Date.parse(right.publishAt || "") || 0) -
-                  (Date.parse(left.publishAt || "") || 0),
-              )
-              .slice(0, 3)
-              .map((item) => ({ ...item, url: articleUrl(item.url) }));
-            candidateGroups[position] = latest;
-            if (!latest.length) emptyCreators.push(creator);
-          } catch {
-            failedCreators.push(creator);
-          }
-          checkedCreators++;
-          A.progress(port, requestId, {
-            phase: "creators",
-            completed: checkedCreators,
-            total: creators.length,
-            failed: failedCreators.length,
-            message: `直近記事を確認中 ${checkedCreators} / ${creators.length}人`,
-          });
-        }
-      }
-      await Promise.all(
-        Array.from({ length: Math.min(3, creators.length) }, creatorWorker),
-      );
-      if (!(await accountMatches(expected))) return accountError();
-      const seen = new Set();
-      const candidates = candidateGroups.flat().filter((item) => {
-        if (!item || seen.has(item.url)) return false;
-        seen.add(item.url);
-        return true;
-      });
-      const eligible = [];
-      let checkedArticles = 0,
+        checkedCreators = 0,
+        candidateCount = 0,
+        checkedArticles = 0,
         likedCount = 0,
         statusFailedCount = 0;
-      cursor = 0;
-      A.progress(port, requestId, {
-        phase: "likes",
-        completed: 0,
-        total: candidates.length,
-        found: 0,
-        message: `${candidates.length}記事のスキ状態を確認しています…`,
-      });
-      async function statusWorker() {
-        while (cursor < candidates.length && !token.cancelled) {
-          const item = candidates[cursor++];
-          try {
-            // Force bypasses the legacy two-minute status cache. The member
-            // build forwards this flag to runStatusApi(articleUrl, true).
-            const status = await A.noteAction("status", {
-              articleUrl: item.url,
-              force: true,
-            });
-            if (!status?.ok || typeof status.liked !== "boolean")
-              throw new Error("unknown_like_status");
-            if (status.liked) likedCount++;
-            else eligible.push({ ...item, liked: false });
-          } catch {
-            // An unknown status is never presented as "not liked".
-            statusFailedCount++;
+
+      const stopped = () => token.cancelled || accountChanged;
+      async function verifyAccount() {
+        if (!(await accountMatches(expected))) accountChanged = true;
+        return !accountChanged;
+      }
+      function report(phase, creator) {
+        A.progress(port, requestId, {
+          phase,
+          creator,
+          completed: phase === "likes" ? checkedArticles : checkedCreators,
+          total: phase === "likes" ? candidateCount : creators.length,
+          found: groups.reduce((sum, items) => sum + (items?.length || 0), 0),
+          candidateCount,
+          checkedArticles,
+          liked: likedCount,
+          failed: statusFailedCount,
+          message: includeLiked
+            ? `新しい記事を取得中 ${checkedCreators} / ${creators.length}人`
+            : `未スキの記事を確認中 ${checkedArticles}記事・${checkedCreators} / ${creators.length}人`,
+        });
+      }
+      report("creators");
+
+      async function scanCreator(creator, position) {
+        const eligible = [];
+        groups[position] = eligible;
+        const seen = new Set();
+        let consecutiveStatusFailures = 0;
+        let statusBlocked = false;
+        let reason = "limit";
+        for (let pageNumber = 1; pageNumber <= MAX_PAGES; pageNumber++) {
+          if (stopped()) {
+            reason = "cancelled";
+            break;
           }
-          checkedArticles++;
-          A.progress(port, requestId, {
-            phase: "likes",
-            completed: checkedArticles,
-            total: candidates.length,
-            found: eligible.length,
-            liked: likedCount,
-            failed: statusFailedCount,
-            message: `スキ状態を確認中 ${checkedArticles} / ${candidates.length}記事`,
-          });
+          let page;
+          try {
+            page = await A.bg().fetchCreatorContentsPage(creator, pageNumber);
+            if (!Array.isArray(page))
+              throw new Error("invalid_creator_response");
+          } catch {
+            reason = "failed";
+            break;
+          }
+          // A page is a separate fetch phase. Never use another account's
+          // status response to decide which articles belong in this result.
+          if (!(await verifyAccount())) break;
+          if (stopped()) {
+            reason = "cancelled";
+            break;
+          }
+          const fresh = [];
+          for (const item of page) {
+            const url = articleUrl(item?.url);
+            if (
+              !url ||
+              creatorName(new URL(url).pathname.split("/")[1]) !== creator ||
+              seen.has(url)
+            )
+              continue;
+            seen.add(url);
+            fresh.push({ ...item, url });
+          }
+          fresh.sort(newestFirst);
+          if (!fresh.length) {
+            reason = "exhausted";
+            break;
+          }
+
+          // At most two status requests per creator and two active creators
+          // keeps the whole job at four concurrent status requests.
+          for (
+            let index = 0;
+            index < fresh.length && eligible.length < target;
+          ) {
+            if (stopped()) break;
+            const batch = fresh.slice(
+              index,
+              index + Math.min(2, target - eligible.length),
+            );
+            index += batch.length;
+            if (includeLiked) {
+              candidateCount += batch.length;
+              for (const item of batch) {
+                // Creator listings may lack viewer-specific metadata. An
+                // unknown state must stay unknown when all posts are allowed.
+                if (typeof item.liked !== "boolean") delete item.liked;
+                eligible.push(item);
+              }
+              report("creators", creator);
+              continue;
+            }
+            report("likes", creator);
+            if (stopped()) break;
+            candidateCount += batch.length;
+            await Promise.all(
+              batch.map(async (item) => {
+                try {
+                  const status = await A.noteAction("status", {
+                    articleUrl: item.url,
+                    force: true,
+                  });
+                  if (!status?.ok || typeof status.liked !== "boolean")
+                    throw new Error("unknown_like_status");
+                  consecutiveStatusFailures = 0;
+                  if (status.liked) likedCount++;
+                  else eligible.push({ ...item, liked: false });
+                } catch {
+                  // A failed/unknown status is omitted and older posts may
+                  // still fill the remaining places.
+                  statusFailedCount++;
+                  consecutiveStatusFailures++;
+                  if (consecutiveStatusFailures >= 10) statusBlocked = true;
+                }
+                checkedArticles++;
+                report("likes", creator);
+              }),
+            );
+            if (statusBlocked) break;
+          }
+          if (eligible.length >= target) {
+            reason = "complete";
+            break;
+          }
+          if (stopped()) {
+            reason = "cancelled";
+            break;
+          }
+          if (statusBlocked) {
+            reason = "status_failed";
+            break;
+          }
+          // A short page is not a terminal marker. Continue until an empty
+          // page, a repeated page (zero new URLs), or the explicit safety cap.
+        }
+        eligible.sort(newestFirst);
+        outcomes[position] = {
+          creator,
+          reason,
+          found: eligible.length,
+          target,
+        };
+        checkedCreators++;
+        report("creators", creator);
+      }
+
+      async function creatorWorker() {
+        while (cursor < creators.length && !stopped()) {
+          const position = cursor++;
+          await scanCreator(creators[position], position);
         }
       }
       await Promise.all(
-        Array.from({ length: Math.min(4, candidates.length) }, statusWorker),
+        Array.from({ length: Math.min(2, creators.length) }, creatorWorker),
       );
-      if (!(await accountMatches(expected))) return accountError();
+      if (!(await verifyAccount())) return accountError();
+      if (accountChanged) return accountError();
+      const items = groups.flat().filter(Boolean);
+      const failedCreators = outcomes
+        .filter((outcome) =>
+          ["failed", "status_failed"].includes(outcome?.reason),
+        )
+        .map((outcome) => outcome.creator);
+      const limitReachedCreators = outcomes
+        .filter((outcome) => outcome?.reason === "limit")
+        .map((outcome) => outcome.creator);
+      const shortfallCreators = creators.flatMap((creator, position) => {
+        const outcome = outcomes[position];
+        if (outcome?.found >= target) return [];
+        return [outcome || { creator, reason: "cancelled", found: 0, target }];
+      });
+      const emptyCreators = outcomes
+        .filter((outcome) => outcome?.reason === "exhausted" && !outcome.found)
+        .map((outcome) => outcome.creator);
       return {
         ok: true,
         owner: expected,
-        items: shuffle(eligible),
+        mode,
+        includeLiked,
+        items: shuffle(items),
         cancelled: Boolean(token.cancelled),
         partial: Boolean(
-          token.cancelled || failedCreators.length || statusFailedCount,
+          token.cancelled ||
+          failedCreators.length ||
+          limitReachedCreators.length ||
+          statusFailedCount,
         ),
         totalCreators: creators.length,
         checkedCreators,
-        candidateCount: candidates.length,
+        candidateCount,
         checkedArticles,
         likedCount,
         statusFailedCount,
         failedCreators,
         emptyCreators,
+        limitReachedCreators,
+        shortfallCreators,
         failed: failedCreators,
       };
     } finally {

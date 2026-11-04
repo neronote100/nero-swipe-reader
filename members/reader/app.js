@@ -18,7 +18,9 @@
     sending = false,
     scanning = false,
     feeding = false,
-    feedSeq = 0;
+    feedSeq = 0,
+    feedRequestPosted = false,
+    feedCancelled = false;
   const pending = new Map();
   function notice(text) {
     $("notice").textContent = text;
@@ -95,6 +97,7 @@
       if (next !== owner) {
         owner = next;
         data = M.normalizeData(null, owner, null);
+        restoreFeedOptions();
         resetFeed();
         inbox = [];
         pendingCommentLikes = [];
@@ -108,6 +111,7 @@
             M.storageKey(owner)
           ];
           data = M.normalizeData(stored, owner);
+          restoreFeedOptions();
           await save();
         }
         renderWatch();
@@ -146,12 +150,16 @@
   }
   function resetFeed() {
     feedSeq++;
-    if (feeding) rpc("cancel_job", { kind: "watch_feed" }).catch(() => {});
+    if (feeding) {
+      feedCancelled = true;
+      if (feedRequestPosted)
+        rpc("cancel_job", { kind: "watch_feed" }).catch(() => {});
+    }
     rows = [];
     index = 0;
     renderArticle();
     $("feedStatus").textContent =
-      "1人の直近3記事からスキ済みを除き、ランダムに表示します。";
+      "スキ済みを飛ばして1人最大3本を集め、ランダムに表示します。";
   }
   function renderWatch() {
     const list = M.activeList(data);
@@ -308,28 +316,86 @@
     $("watchInput").value = "";
     renderWatch();
   });
-  $("refreshFeed").onclick = async () => {
+  function restoreFeedOptions() {
+    $("feedIncludeLiked").checked = data.feedOptions.includeLiked;
+    $("deepIncludeLiked").checked = data.feedOptions.deepIncludeLiked;
+    $("deepCreator").value = data.feedOptions.deepCreator;
+  }
+  $("feedIncludeLiked").onchange = async () => {
+    if (!requireOwner()) return;
+    data.feedOptions.includeLiked = $("feedIncludeLiked").checked;
+    resetFeed();
+    await save();
+  };
+  $("deepIncludeLiked").onchange = async () => {
+    if (!requireOwner()) return;
+    data.feedOptions.deepIncludeLiked = $("deepIncludeLiked").checked;
+    resetFeed();
+    await save();
+  };
+  $("deepCreator").oninput = () => {
+    resetFeed();
+  };
+  $("deepCreator").onchange = async () => {
+    resetFeed();
+    if (!owner) return;
+    data.feedOptions.deepCreator = M.watchName($("deepCreator").value);
+    await save();
+  };
+  async function fetchArticles(mode) {
     if (!requireOwner() || feeding) return;
-    const list = M.activeList(data);
-    if (!list.users.length) {
+    const list = M.activeList(data),
+      creator = mode === "deep" ? M.watchName($("deepCreator").value) : "";
+    if (mode === "deep" && !creator) {
+      notice(
+        "深掘りする人のnoteユーザー名かプロフィールURLを入力してください。",
+      );
+      return;
+    }
+    if (mode === "watch" && !list.users.length) {
       notice("ユーザーを追加するか、リストファイルを読み込んでください。");
       return;
     }
     const account = owner,
       listId = list.id,
       token = ++feedSeq;
+    const includeLiked =
+      mode === "deep"
+        ? $("deepIncludeLiked").checked
+        : $("feedIncludeLiked").checked;
+    data.feedOptions.includeLiked = $("feedIncludeLiked").checked;
+    data.feedOptions.deepIncludeLiked = $("deepIncludeLiked").checked;
+    if (mode === "deep") data.feedOptions.deepCreator = creator;
+    const args =
+      mode === "deep"
+        ? { mode: "deep", creator, expectedAccount: account, includeLiked }
+        : {
+            mode: "watch",
+            creators: [...list.users],
+            expectedAccount: account,
+            includeLiked,
+          };
     feeding = true;
+    feedRequestPosted = false;
+    feedCancelled = false;
     $("refreshFeed").disabled = true;
+    $("deepFetch").disabled = true;
     $("cancelFeed").hidden = false;
     $("feedProgress").hidden = false;
     rows = [];
     index = 0;
     renderArticle();
-    $("feedStatus").textContent = "記事を取得しています…";
+    $("readerListName").textContent =
+      (mode === "deep" ? "深掘り：@" + creator : list.name) + " / RANDOM";
+    $("feedStatus").textContent =
+      mode === "deep" ? "最大50本を探しています…" : "1人最大3本を探しています…";
     try {
+      await save();
+      if (owner !== account || token !== feedSeq || feedCancelled) return;
+      feedRequestPosted = true;
       const r = await rpc(
         "watch_feed",
-        { creators: [...list.users], expectedAccount: account },
+        args,
         (p) => {
           if (token !== feedSeq) return;
           $("feedStatus").textContent = p.message;
@@ -345,12 +411,13 @@
       )
         return;
       rows = (r.items || []).filter(
-        (row) => M.articleUrl(row.url) && row.liked === false,
+        (row) => M.articleUrl(row.url) && (includeLiked || row.liked === false),
       );
       index = 0;
       renderArticle();
       $("feedStatus").textContent =
-        `${r.cancelled ? "中断：" : ""}${rows.length}件をランダム表示 / スキ済み ${r.likedCount || 0}件を除外` +
+        `${r.cancelled ? "中断：" : ""}${rows.length}件をランダム表示 / ${includeLiked ? "スキ済みを含む" : "未スキのみ"}` +
+        (!includeLiked ? ` / スキ済み ${r.likedCount || 0}件をスキップ` : "") +
         (r.statusFailedCount
           ? ` / スキ状態不明 ${r.statusFailedCount}件を除外`
           : "") +
@@ -359,18 +426,37 @@
           : "") +
         (r.emptyCreators?.length
           ? ` / 記事なし ${r.emptyCreators.length}人`
+          : "") +
+        (r.shortfallCreators?.length
+          ? ` / 目標本数に満たない人 ${r.shortfallCreators.length}人`
+          : "") +
+        (r.limitReachedCreators?.length
+          ? ` / 探索上限 ${r.limitReachedCreators.length}人（途中結果）`
           : "");
     } catch (e) {
       if (token === feedSeq) $("feedStatus").textContent = e.message;
     } finally {
       feeding = false;
+      feedRequestPosted = false;
       $("refreshFeed").disabled = false;
+      $("deepFetch").disabled = false;
       $("cancelFeed").hidden = true;
       $("feedProgress").hidden = true;
     }
+  }
+  $("refreshFeed").onclick = () => fetchArticles("watch");
+  $("deepFetch").onclick = () => fetchArticles("deep");
+  $("cancelFeed").onclick = () => {
+    if (!feeding) return;
+    feedCancelled = true;
+    if (!feedRequestPosted) {
+      $("feedStatus").textContent = "記事の取得を中断しました。";
+      return;
+    }
+    return rpc("cancel_job", { kind: "watch_feed" }).catch((e) =>
+      notice(e.message),
+    );
   };
-  $("cancelFeed").onclick = () =>
-    rpc("cancel_job", { kind: "watch_feed" }).catch((e) => notice(e.message));
   function safeLink(value) {
     try {
       const u = new URL(value, "https://note.com/");
@@ -1002,6 +1088,7 @@
       "nero.members.commentLikes.v1." + owner,
     ]);
     data = M.normalizeData(null, owner, null);
+    restoreFeedOptions();
     inbox = [];
     pendingCommentLikes = [];
     unknownReplyCount = 0;

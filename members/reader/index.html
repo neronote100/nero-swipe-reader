@@ -62,13 +62,38 @@
         </form>
         <ul id="watchList"></ul>
         <ul id="pendingMembers" class="pending-members"></ul>
-        <button id="refreshFeed" class="primary wide">
-          未スキの新着記事を取得
-        </button>
+        <label class="feed-toggle"
+          ><input
+            id="feedIncludeLiked"
+            type="checkbox"
+          />スキ済みの記事も含める</label
+        >
+        <button id="refreshFeed" class="primary wide">新着記事を取得</button>
+        <details id="deepSection">
+          <summary>深掘りモード — 1人をじっくり読む</summary>
+          <label for="deepCreator">noteのユーザー名・プロフィールURL</label>
+          <input
+            id="deepCreator"
+            maxlength="200"
+            placeholder="読みたい人のユーザー名"
+          />
+          <label class="feed-toggle"
+            ><input
+              id="deepIncludeLiked"
+              type="checkbox"
+            />スキ済みの記事も含める</label
+          >
+          <button id="deepFetch" class="primary wide">
+            この人の記事を最大50本取得
+          </button>
+          <p class="muted">
+            OFFなら未スキ記事を最大50本、ONならスキ済みを含む最新50本を探します。
+          </p>
+        </details>
         <button id="cancelFeed" class="wide" hidden>記事取得を中断</button>
         <progress id="feedProgress" hidden></progress>
         <p id="feedStatus" class="muted">
-          1人の直近3記事からスキ済みを除き、ランダムに表示します。
+          スキ済みを飛ばして1人最大3本を集め、ランダムに表示します。
         </p>
         <details>
           <summary>使い方・データ管理</summary>

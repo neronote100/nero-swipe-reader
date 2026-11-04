@@ -40,6 +40,93 @@ assert.deepEqual(old.watch, [
 ]);
 assert.equal(migrated.drafts.comment, "下書き");
 assert.equal(migrated.uncertain.comment, true);
+assert.deepEqual(
+  plain(migrated.feedOptions),
+  {
+    includeLiked: false,
+    deepIncludeLiked: false,
+    deepCreator: "",
+  },
+  "legacy data defaults to unliked feeds and no deep creator",
+);
+
+// Feed preferences accept actual booleans and normalize the deep creator.
+const rawPreferences = {
+  owner: "reader_owner",
+  feedOptions: {
+    includeLiked: true,
+    deepIncludeLiked: false,
+    deepCreator: "https://note.com/PREF_WRITER?from=profile",
+    unexpected: "discard",
+  },
+};
+const preferences = M.normalizeData(rawPreferences, "reader_owner", null);
+assert.deepEqual(plain(preferences.feedOptions), {
+  includeLiked: true,
+  deepIncludeLiked: false,
+  deepCreator: "pref_writer",
+});
+assert.equal(
+  rawPreferences.feedOptions.deepCreator,
+  "https://note.com/PREF_WRITER?from=profile",
+  "normalization does not mutate saved preferences",
+);
+assert.notEqual(preferences.feedOptions, rawPreferences.feedOptions);
+assert.deepEqual(
+  plain(
+    M.normalizeData(
+      {
+        feedOptions: {
+          includeLiked: "true",
+          deepIncludeLiked: 1,
+          deepCreator: "https://example.com/writer",
+        },
+      },
+      "reader_owner",
+      null,
+    ).feedOptions,
+  ),
+  {
+    includeLiked: false,
+    deepIncludeLiked: false,
+    deepCreator: "",
+  },
+  "truthy non-booleans and a foreign creator URL are not valid preferences",
+);
+assert.deepEqual(
+  plain(
+    M.normalizeData(
+      {
+        feedOptions: {
+          includeLiked: false,
+          deepIncludeLiked: true,
+          deepCreator: "@DEEP_WRITER",
+        },
+      },
+      "reader_owner",
+      null,
+    ).feedOptions,
+  ),
+  {
+    includeLiked: false,
+    deepIncludeLiked: true,
+    deepCreator: "deep_writer",
+  },
+);
+assert.deepEqual(
+  plain(M.normalizeData(preferences, "another_owner", null).feedOptions),
+  {
+    includeLiked: false,
+    deepIncludeLiked: false,
+    deepCreator: "",
+  },
+  "another account must not inherit a reader's feed preferences",
+);
+assert.deepEqual(
+  plain(M.normalizeData(preferences, "READER_OWNER", null).feedOptions),
+  plain(preferences.feedOptions),
+  "the same normalized account keeps preferences on reload",
+);
 
 // Presets are account-bound, including accidentally reused in-memory state.
 const other = M.normalizeData({}, "another_owner", preset);
@@ -109,6 +196,34 @@ assert.deepEqual(plain(M.activeList(merged).users), [
 assert.equal(M.activeList(merged).name, "読書仲間");
 assert.equal(M.activeList(merged).pending.length, 1);
 
+for (const merge of [false, true]) {
+  const preferencesImported = M.importList(
+    preferences,
+    {
+      owner: "reader_owner",
+      list: { name: "Imported readers", users: ["imported_reader"] },
+      feedOptions: {
+        includeLiked: false,
+        deepIncludeLiked: true,
+        deepCreator: "external_writer",
+      },
+    },
+    { targetId: "list-2", merge },
+  );
+  assert.deepEqual(
+    plain(preferencesImported.feedOptions),
+    plain(preferences.feedOptions),
+    "watchlist imports preserve local feed preferences instead of importing external preferences",
+  );
+  assert.notEqual(preferencesImported.feedOptions, preferences.feedOptions);
+  preferencesImported.feedOptions.includeLiked = false;
+  assert.equal(
+    preferences.feedOptions.includeLiked,
+    true,
+    "imported data must not share its preference object with the source data",
+  );
+}
+
 assert.throws(() => M.importList(reloaded, "{invalid"), /JSON/);
 assert.throws(
   () => M.importList(reloaded, { users: ["valid", "ID未照合"] }),
@@ -153,5 +268,5 @@ assert.equal(M.MAX_LISTS, 11);
 assert.equal(M.MAX_CREATORS, 200);
 
 console.log(
-  "watchlists-check-ok: migration, 11 lists, account isolation, one-time presets, import validation",
+  "watchlists-check-ok: migration, 11 lists, account isolation, one-time presets, import validation, feed preference normalization and retention",
 );

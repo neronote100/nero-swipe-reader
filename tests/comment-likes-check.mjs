@@ -24,7 +24,11 @@ const base = {
   replyTarget: target,
 };
 const queueKey = "nero.members.commentLikes.v1.alice";
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => (resolve = r));
+  return { promise, resolve };
+}
 function harness() {
   const h = {
     storage: {},
@@ -266,17 +270,21 @@ function harness() {
 // Prevent concurrent clicks before awaiting account verification.
 {
   const h = harness();
-  let release;
-  h.beforeComment = () => new Promise((r) => (release = r));
+  const entered = deferred();
+  const blocked = deferred();
+  h.beforeComment = () => {
+    entered.resolve();
+    return blocked.promise;
+  };
   const first = h.api.reply({ ...base, comment: "first" });
-  await flush();
   assert.equal((await h.api.like(base)).code, "busy");
   assert.equal(
     (await h.api.pendingLikes("alice")).code,
     "busy",
     "a queue reader must not overwrite an in-flight reply",
   );
-  release();
+  await entered.promise;
+  blocked.resolve();
   assert.equal((await first).liked, true);
   assert.equal(h.calls.length, 2);
 }
@@ -317,23 +325,22 @@ function harness() {
   const item = Object.values(h.storage[queueKey].items)[0];
   item.stage = "reply_pending";
   item.replySent = false;
-  let release;
-  h.beforeSet = (value) =>
-    value[queueKey] ? new Promise((r) => (release = r)) : undefined;
+  const entered = deferred();
+  const blocked = deferred();
+  h.beforeSet = (value) => {
+    if (!value[queueKey]) return;
+    entered.resolve();
+    return blocked.promise;
+  };
   const recovering = h.api.pendingLikes("alice");
-  await flush();
-  assert.equal(
-    typeof release,
-    "function",
-    "the fixture must block during the recovery write",
-  );
+  await entered.promise;
   assert.equal((await h.api.like(base)).code, "busy");
   assert.equal(
     (await h.api.reply({ ...base, comment: "another tab" })).code,
     "busy",
   );
   assert.equal((await h.api.pendingLikes("alice")).code, "busy");
-  release();
+  blocked.resolve();
   const result = await recovering;
   h.beforeSet = null;
   assert.equal(result.ok, true);
