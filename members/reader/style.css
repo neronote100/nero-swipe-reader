@@ -282,6 +282,61 @@ summary {
 #body a {
   font-size: inherit;
 }
+#body a:not(.article-link-card) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+#body .article-link-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  margin: 22px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}
+#body .article-link-card:hover {
+  border-color: var(--green);
+  background: var(--sage);
+}
+.article-link-card-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+}
+.article-link-card-title,
+.article-link-card-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.article-link-card-title {
+  font-size: 15px;
+}
+.article-link-card-description,
+.article-link-card-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+#body .article-link-card-image {
+  width: clamp(68px, 22vw, 128px);
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.article-back {
+  align-self: flex-start;
+  margin: 12px 0 0;
+}
 #original {
   display: block;
   margin-top: 26px;

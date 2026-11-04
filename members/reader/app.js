@@ -1,7 +1,8 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id),
-    M = globalThis.NeroMemberModel;
+    M = globalThis.NeroMemberModel,
+    B = globalThis.NeroArticleBody;
   let port,
     seq = 0,
     owner = "",
@@ -9,6 +10,9 @@
     rows = [],
     index = 0,
     articleSeq = 0,
+    linkedArticle = null,
+    articleHistory = [],
+    cardObserver = null,
     inbox = [],
     pendingCommentLikes = [],
     pendingLikeVisible = 30,
@@ -21,7 +25,8 @@
     feedSeq = 0,
     feedRequestPosted = false,
     feedCancelled = false;
-  const pending = new Map();
+  const pending = new Map(),
+    cardMetadataCache = new Map();
   function notice(text) {
     $("notice").textContent = text;
     $("notice").hidden = !text;
@@ -157,6 +162,7 @@
     }
     rows = [];
     index = 0;
+    resetArticleNavigation();
     renderArticle();
     $("feedStatus").textContent =
       "スキ済みを飛ばして1人最大3本を集め、ランダムに表示します。";
@@ -384,6 +390,7 @@
     $("feedProgress").hidden = false;
     rows = [];
     index = 0;
+    resetArticleNavigation();
     renderArticle();
     $("readerListName").textContent =
       (mode === "deep" ? "深掘り：@" + creator : list.name) + " / RANDOM";
@@ -458,114 +465,92 @@
     );
   };
   function safeLink(value) {
+    return B.safeUrl(value, "https://note.com/");
+  }
+  function canonicalArticleUrl(value, key) {
     try {
-      const u = new URL(value, "https://note.com/");
-      return u.protocol === "https:" ? u.href : "";
+      const u = new URL(value);
+      if (
+        u.username ||
+        u.password ||
+        u.port ||
+        u.protocol !== "https:" ||
+        u.hostname !== "note.com"
+      )
+        return "";
+      const match = u.pathname.match(
+        /^\/([a-zA-Z0-9_-]+)\/n\/(n[a-zA-Z0-9_-]+)\/?$/,
+      );
+      return match && (!key || match[2] === key)
+        ? u.origin + u.pathname.replace(/\/$/, "")
+        : "";
     } catch {
       return "";
     }
   }
-  function richBody(value) {
-    const fragment = document.createDocumentFragment(),
-      doc = new DOMParser().parseFromString(String(value || ""), "text/html");
-    const allowed = new Set([
-      "P",
-      "BR",
-      "DIV",
-      "H1",
-      "H2",
-      "H3",
-      "H4",
-      "UL",
-      "OL",
-      "LI",
-      "BLOCKQUOTE",
-      "STRONG",
-      "EM",
-      "B",
-      "I",
-      "A",
-      "IMG",
-      "FIGURE",
-      "FIGCAPTION",
-      "PRE",
-      "CODE",
-      "HR",
-      "SPAN",
-    ]);
-    function append(src, parent) {
-      if (src.nodeType === 3) {
-        parent.append(document.createTextNode(src.nodeValue));
-        return;
-      }
-      if (
-        src.nodeType !== 1 ||
-        [
-          "SCRIPT",
-          "STYLE",
-          "IFRAME",
-          "OBJECT",
-          "FORM",
-          "NOSCRIPT",
-          "SVG",
-          "MATH",
-        ].includes(src.tagName)
-      )
-        return;
-      if (!allowed.has(src.tagName)) {
-        src.childNodes.forEach((n) => append(n, parent));
-        return;
-      }
-      const el = document.createElement(src.tagName);
-      if (src.tagName === "A") {
-        const url = safeLink(src.getAttribute("href"));
-        if (url) {
-          el.href = url;
-          el.target = "_blank";
-          el.rel = "noreferrer noopener";
-        }
-      }
-      if (src.tagName === "IMG") {
-        const url = safeLink(
-          src.getAttribute("src") || src.getAttribute("data-src"),
-        );
-        if (!url) return;
-        el.src = url;
-        el.alt = src.getAttribute("alt") || "";
-        el.loading = "lazy";
-        el.referrerPolicy = "no-referrer";
-      }
-      src.childNodes.forEach((n) => append(n, el));
-      parent.append(el);
-    }
-    doc.body.childNodes.forEach((n) => append(n, fragment));
-    return fragment;
+  function currentArticle() {
+    return linkedArticle || rows[index];
   }
-  async function renderArticle() {
-    const row = rows[index],
-      token = ++articleSeq;
-    $("empty").hidden = !!row;
-    $("article").hidden = !row;
-    $("position").textContent = rows.length
-      ? `${index + 1} / ${rows.length}`
-      : "0 / 0";
-    $("like").disabled = true;
-    $("articleComment").disabled = !row || !owner;
-    $("prev").disabled = !rows.length || index === 0;
-    $("next").disabled = !rows.length || index === rows.length - 1;
-    if (!row) return;
+  function resetArticleNavigation() {
+    linkedArticle = null;
+    articleHistory = [];
+  }
+  function openLinkedArticle(target) {
+    const previous = currentArticle();
+    const key = String(target?.key || "");
+    if (!previous || !requireOwner() || !/^n[a-zA-Z0-9_-]+$/.test(key)) return;
+    if (previous.key === key) {
+      if (target.hash) scrollToArticleAnchor(target.hash);
+      return;
+    }
+    articleHistory.push({
+      linked: linkedArticle,
+      scrollTop: $("articleScroll").scrollTop,
+    });
+    linkedArticle = {
+      key,
+      url: canonicalArticleUrl(target.url, key),
+      urlname: M.watchName(target.urlname),
+      name: "リンク先の記事",
+    };
+    renderArticle({ anchor: target.hash || "" });
+  }
+  $("articleBack").onclick = () => {
+    const previous = articleHistory.pop();
+    if (!previous) return;
+    linkedArticle = previous.linked;
+    renderArticle({ scrollTop: previous.scrollTop });
+  };
+  function scrollToArticleAnchor(hash) {
+    if (!hash) return false;
+    const el = document.getElementById(B.anchorId(hash));
+    if (!el) return false;
+    el.scrollIntoView({ block: "start" });
+    return true;
+  }
+  function applyArticleMetadata(row, result) {
+    const canonical = canonicalArticleUrl(result.url, row.key);
+    if (canonical) row.url = canonical;
+    if (result.title) row.name = result.title;
+    if (result.urlname) row.urlname = M.watchName(result.urlname);
+    if (result.nickname) row.nickname = result.nickname;
+    if (result.publishAt) row.publishAt = result.publishAt;
+  }
+  function updateArticleHeader(row) {
+    $("title").textContent = row.name || "無題の記事";
     $("author").textContent =
       (row.nickname || row.urlname || "") +
-      " · " +
       (row.publishAt
-        ? new Date(row.publishAt).toLocaleDateString("ja-JP")
+        ? " · " + new Date(row.publishAt).toLocaleDateString("ja-JP")
         : "");
-    $("title").textContent = row.name || "無題の記事";
-    $("original").href = row.url;
-    $("body").textContent = "本文を読み込んでいます…";
-    $("cover").hidden = true;
-    $("articleScroll").scrollTop = 0;
-    $("like").textContent = "♡ スキ";
+    const url = canonicalArticleUrl(row.url, row.key);
+    $("original").hidden = !url;
+    if (url) $("original").href = url;
+    else $("original").removeAttribute("href");
+    $("articleComment").disabled = !url || !owner;
+  }
+  function updateArticleStatus(row, token) {
+    if (!canonicalArticleUrl(row.url, row.key)) return;
     rpc("note_action", {
       noteAction: "status",
       articleUrl: row.url,
@@ -573,38 +558,170 @@
     })
       .then((r) => {
         if (token !== articleSeq) return;
-        row.liked = !!r.liked;
+        row.liked = r.liked === true;
         $("like").textContent = row.liked ? "♥ スキ済み" : "♡ スキ";
         $("like").disabled = row.liked;
       })
       .catch(() => {
         if (token === articleSeq) $("like").disabled = false;
       });
+  }
+  function cardMetadata(key, account) {
+    const cacheKey = account + ":" + key;
+    const cached = cardMetadataCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < 60000) return cached.promise;
+    const promise = rpc("article", { key })
+      .then((r) => ({
+        title: r.title,
+        description: r.description,
+        imageUrl: r.imageUrl,
+        url: canonicalArticleUrl(r.url, key),
+        nickname: r.nickname,
+        urlname: r.urlname,
+      }))
+      .catch((error) => {
+        cardMetadataCache.delete(cacheKey);
+        throw error;
+      });
+    cardMetadataCache.set(cacheKey, { at: Date.now(), promise });
+    while (cardMetadataCache.size > 80)
+      cardMetadataCache.delete(cardMetadataCache.keys().next().value);
+    return promise;
+  }
+  function hydrateArticleCards(cards, token) {
+    const account = owner,
+      queued = [];
+    let active = 0;
+    async function drain() {
+      while (active < 2 && queued.length && token === articleSeq) {
+        const card = queued.shift();
+        active++;
+        (async () => {
+          try {
+            const r = await cardMetadata(card.key, account);
+            if (token !== articleSeq || owner !== account) return;
+            if (r.title) card.title.textContent = r.title;
+            if (r.description) {
+              card.description.textContent = r.description;
+              card.description.hidden = false;
+            }
+            card.meta.textContent =
+              (r.nickname || r.urlname || "note") + " · リーダーで読む →";
+            if (r.url) card.link.href = r.url;
+            const image = safeLink(r.imageUrl);
+            if (image.startsWith("https://")) {
+              card.image.src = image;
+              card.image.hidden = false;
+              card.image.addEventListener(
+                "error",
+                () => {
+                  card.image.hidden = true;
+                },
+                { once: true },
+              );
+            }
+          } catch {
+            /* The visible URL remains usable if metadata fails. */
+          } finally {
+            active--;
+            drain();
+          }
+        })();
+      }
+    }
+    if (typeof IntersectionObserver === "function") {
+      const byElement = new Map(cards.map((card) => [card.element, card]));
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting || token !== articleSeq) continue;
+            observer.unobserve(entry.target);
+            queued.push(byElement.get(entry.target));
+          }
+          drain();
+        },
+        { root: $("articleScroll"), rootMargin: "240px" },
+      );
+      cardObserver = observer;
+      cards.forEach((card) => observer.observe(card.element));
+    } else {
+      queued.push(...cards);
+      drain();
+    }
+  }
+  async function renderArticle({ scrollTop = 0, anchor = "" } = {}) {
+    const row = currentArticle(),
+      token = ++articleSeq;
+    cardObserver?.disconnect();
+    cardObserver = null;
+    $("empty").hidden = !!row;
+    $("article").hidden = !row;
+    $("articleBack").hidden = !articleHistory.length;
+    $("position").textContent = rows.length
+      ? `${linkedArticle ? "リンク先 · " : ""}${index + 1} / ${rows.length}`
+      : "0 / 0";
+    $("like").disabled = true;
+    $("articleComment").disabled = true;
+    $("prev").disabled = !!linkedArticle || !rows.length || index === 0;
+    $("next").disabled =
+      !!linkedArticle || !rows.length || index === rows.length - 1;
+    $("articleHint").textContent = linkedArticle
+      ? "リンク先の記事を表示中 / 「リンク元へ戻る」で読んでいた場所へ"
+      : "上・下にスワイプ / ↑ ↓ キーで切り替え";
+    if (!row) return;
+    if (!row.key) row.key = canonicalArticleUrl(row.url).split("/n/")[1] || "";
+    updateArticleHeader(row);
+    $("body").textContent = "本文を読み込んでいます…";
+    $("cover").hidden = true;
+    $("articleScroll").scrollTop = 0;
+    $("like").textContent = "♡ スキ";
+    const initialUrl = canonicalArticleUrl(row.url, row.key);
+    if (initialUrl) updateArticleStatus(row, token);
     try {
       const r = await rpc("article", {
         key: row.key || row.url.split("/n/")[1],
       });
       if (token !== articleSeq) return;
+      applyArticleMetadata(row, r);
+      updateArticleHeader(row);
+      if (!initialUrl || initialUrl !== row.url)
+        updateArticleStatus(row, token);
+      const cards = [];
       $("body").replaceChildren(
-        richBody(
+        B.render(
           r.body ||
             r.description ||
             row.description ||
             "本文はnoteで確認してください。",
+          {
+            baseUrl: row.url || "https://note.com/n/" + row.key,
+            onArticleLink: (target) => {
+              if (token === articleSeq) openLinkedArticle(target);
+            },
+            onCard: (card) => {
+              if (card.key) cards.push(card);
+            },
+          },
         ),
       );
       const cover = safeLink(r.imageUrl || row.eyecatch);
-      if (cover) {
+      if (cover.startsWith("https://")) {
         $("cover").src = cover;
         $("cover").referrerPolicy = "no-referrer";
         $("cover").hidden = false;
       }
+      $("articleScroll").scrollTop = scrollTop;
+      if (anchor) scrollToArticleAnchor(anchor);
+      if (cards.length) hydrateArticleCards(cards, token);
     } catch (e) {
-      if (token === articleSeq)
-        $("body").textContent = e.message + " noteで記事を開けます。";
+      if (token === articleSeq) {
+        $("body").textContent = e.message + " noteで記事を確認してください。";
+        $("articleScroll").scrollTop = scrollTop;
+      }
     }
   }
   function move(d) {
+    if (linkedArticle) return;
     const next = Math.max(0, Math.min(rows.length - 1, index + d));
     if (next === index) return;
     index = next;
@@ -666,9 +783,9 @@
   );
   $("like").onclick = async () => {
     if (!requireOwner()) return;
-    const row = rows[index],
+    const row = currentArticle(),
       token = articleSeq;
-    if (!row) return;
+    if (!row || !canonicalArticleUrl(row.url, row.key)) return;
     $("like").disabled = true;
     try {
       await rpc(
@@ -910,8 +1027,8 @@
     $("draft").focus();
   }
   $("articleComment").onclick = () => {
-    const r = rows[index];
-    if (r)
+    const r = currentArticle();
+    if (r && canonicalArticleUrl(r.url, r.key))
       openComposer({
         kind: "comment",
         articleUrl: r.url,
@@ -1094,6 +1211,7 @@
     unknownReplyCount = 0;
     renderPendingLikes();
     rows = [];
+    resetArticleNavigation();
     composer = null;
     $("composer").hidden = true;
     renderWatch();

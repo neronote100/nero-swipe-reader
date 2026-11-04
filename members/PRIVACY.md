@@ -18,3 +18,6 @@
 Mozillaへの申告にある personalCommunications はコメント・下書き、websiteActivity はウォッチリスト・記事情報の処理を指します。これらの情報は開発者のサーバーへ収集しません。
 
 サポート窓口：移管後のGitHubリポジトリ https://github.com/neronote100/nero-swipe-reader/issues （移管待ちの間は https://github.com/cosmos-invest/nero-swipe-reader/issues ）
+
+
+記事内のnoteカードを表示する際は、表示位置に近いカードからnoteへタイトル・画像等を取得します。補完情報の一時キャッシュはメモリー内でアカウント別に管理し、端末への永続保存はしません。外部サイトのプレビュー取得は行いません。外部リンクを選択するとFirefoxの別タブでそのサイトを開き、そのサイトのプライバシー方針が適用されます。

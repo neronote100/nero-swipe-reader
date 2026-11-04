@@ -114,6 +114,9 @@
           <span class="eyebrow" id="readerListName">WATCHLIST / RANDOM</span
           ><span id="position">0 / 0</span>
         </div>
+        <button id="articleBack" class="article-back" type="button" hidden>
+          ← リンク元へ戻る
+        </button>
         <div id="articleScroll" tabindex="0">
           <div id="empty">
             <span class="moon">☾</span>
@@ -138,7 +141,9 @@
           ><button id="articleComment" disabled>コメント</button
           ><button id="next" aria-label="次の記事">次へ ↓</button>
         </nav>
-        <p class="hint">上・下にスワイプ / ↑ ↓ キーで切り替え</p>
+        <p class="hint" id="articleHint">
+          上・下にスワイプ / ↑ ↓ キーで切り替え
+        </p>
       </section>
       <aside class="inbox">
         <div class="section-heading">
@@ -190,6 +195,7 @@
       </aside>
     </main>
     <script src="model.js"></script>
+    <script src="body.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

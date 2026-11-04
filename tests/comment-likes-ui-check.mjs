@@ -192,6 +192,7 @@ async function harness() {
     prompt: () => null,
   });
   vm.runInContext(fs.readFileSync("members/reader/model.js", "utf8"), ctx);
+  vm.runInContext(fs.readFileSync("members/reader/body.js", "utf8"), ctx);
   vm.runInContext(fs.readFileSync("members/reader/app.js", "utf8"), ctx);
   await waitFor(() => elements.inboxList.children.length === 1);
   await waitFor(() =>

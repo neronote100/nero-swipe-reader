@@ -39,6 +39,9 @@ class Element {
   setAttribute(name, value) {
     this[name] = value;
   }
+  removeAttribute(name) {
+    delete this[name];
+  }
   focus() {}
   remove() {}
   async dispatch(type) {
@@ -208,6 +211,7 @@ async function harness() {
     prompt: () => null,
   });
   vm.runInContext(fs.readFileSync("members/reader/model.js", "utf8"), ctx);
+  vm.runInContext(fs.readFileSync("members/reader/body.js", "utf8"), ctx);
   vm.runInContext(fs.readFileSync("members/reader/app.js", "utf8"), ctx);
   await waitFor(
     () =>
