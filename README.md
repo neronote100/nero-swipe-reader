@@ -19,15 +19,15 @@ noteのウォッチリストをスワイプしながら読み、記事を開い�
 
 配布用ZIPを解凍し、PC版Chromeの `chrome://extensions` で「デベロッパーモード」をONにして「パッケージ化されていない拡張機能を読み込む」からフォルダーを選択します。Chrome Web Store登録・Googleへの登録料・Mozilla署名は不要です。
 
-[Chrome版の導入・更新手順](docs/CHROME_INSTALL.md) / [配布ZIP](downloads/v0.5.0/nero-swipe-reader-0.5.0-chrome.zip)
+[Chrome版の導入・更新手順](docs/CHROME_INSTALL.md) / [配布ZIP](downloads/v0.5.1/nero-swipe-reader-0.5.1-chrome.zip)
 
-Chrome 120以降（最新版を推奨）のWindows・Mac・Linux向けです。Android・iPhone版Chromeには導入できません。長い取得は開いているリーダータブで実行し、同時に有効なリーダーは1つです。取得中はリーダータブを閉じず、他のタブで作業できます。更新は手動でファイルを差し替えて拡張を再読み込みします。
+Chrome 120以降（最新版を推奨）のWindows・Mac・Linux向けです。Android・iPhone版Chromeには導入できません。長い取得は開いているリーダータブで実行し、同時に有効なリーダーは1つです。同じChromeプロフィールでログインしたnoteタブを開き、noteタブとリーダータブの両方を閉じずに利用します。他のタブでの作業は可能です。更新は手動でファイルを差し替えて拡張を再読み込みします。
 
 ```bash
 npm run package:chrome
 ```
 
-`dist/chrome-members/`、`dist/nero-swipe-reader-0.5.0-chrome.zip`、再ビルド用の `dist/nero-swipe-reader-0.5.0-chrome-source.zip` を生成します。
+`dist/chrome-members/`、`dist/nero-swipe-reader-0.5.1-chrome.zip`、再ビルド用の `dist/nero-swipe-reader-0.5.1-chrome-source.zip` を生成します。
 
 ## Firefox版の開発用インストール
 
@@ -37,7 +37,7 @@ npm run package:members
 
 PC版Firefoxの `about:debugging#/runtime/this-firefox` →「一時的なアドオンを読み込む」から `dist/firefox-members/manifest.json` を選択。ツールバーの拡張アイコンでリーダーを開きます。同じFirefoxでnoteへログインして「再確認」を押してください。
 
-一時読み込みはFirefoxの再起動で解除されます。生成される `dist/nero-swipe-reader-0.5.0-unsigned.zip` はMozilla署名前の開発用です。通常のPC版・Android版Firefoxへの配布には署名済みXPIが必要です。
+一時読み込みはFirefoxの再起動で解除されます。生成される `dist/nero-swipe-reader-0.5.1-unsigned.zip` はMozilla署名前の開発用です。通常のPC版・Android版Firefoxへの配布には署名済みXPIが必要です。
 
 ## Firefox版のメンバー配布まで
 
@@ -121,3 +121,14 @@ npm run package:chrome # 共通検査とChrome配布ZIPを生成
 - Chrome配布用の公開キーを固定し、更新後も同じ拡張IDを保つ。更新手順と通信・保存内容を配布ZIPの `INSTALL.md` に同梱する。
 - FirefoxとChromeの画面・機能を共通のソースから生成し、ブラウザーごとのログインとローカル保存を使う。ウォッチリストはJSONで移せる。
 - ZIP生成はNode.js組込機能だけで行い、追加の圧縮ツールやGitチェックアウトを必要としない。
+
+
+## v0.5.1 の変更
+
+- Chromeの通信を、開いているnoteタブの同一オリジン内で実行する方式へ変更。拡張ページからの認証付き通信がCookie制限等で失敗する場合に対応する。
+- ログイン確認だけでなく、記事・コメント取得と投稿も同じnoteタブ経由に統一する。タブを閉じる・note以外へ移動した場合は停止し、別のタブへの投稿を自動再試行しない。
+- Chrome権限に`scripting`を追加。対象は既存の`https://note.com/*`だけ。Cookie値の読出し・書出し・開発者への転送は行わない。
+- noteタブがない、サイトアクセスを許可していない、HTTP 401／403／429、通信失敗、タイムアウトなどを区別して表示する。HTTP 403を未ログインと決めつけない。
+- ログイン確認を毎回やり直し、アカウント切替・送信前の照合・重複投稿防止を維持する。
+
+更新時はリーダーを閉じ、同じ保管フォルダーへ新版を上書きしてChromeの拡張機能を再読み込みする。続いてログイン済みのnoteタブを開いたままリーダーの「再確認」を押す。

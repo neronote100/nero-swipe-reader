@@ -5,7 +5,9 @@ Run after `npm run build:chrome` with Python Playwright installed:
   python tests/chrome-browser-smoke.py
 Use --probe to check only whether this host can launch Chromium. Exit code 2
 means browser verification was not executed, and must not be reported as a pass.
-This script never signs in to or sends a request to a real note account.
+This script opens a mocked note tab first and attaches a synthetic HttpOnly
+Cookie. Every API request must originate in that note tab, rather than in the
+extension page. It never signs in to or contacts a real note account.
 """
 import argparse
 import base64
@@ -42,7 +44,7 @@ def main():
     flags = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-crashpad-for-testing"]
     if not args.probe:
         flags += [f"--disable-extensions-except={extension}", f"--load-extension={extension}"]
-    posts, unexpected, liked = [], [], {"n0", "n1", "n2"}
+    posts, unexpected, liked, api_realms = [], [], {"n0", "n1", "n2"}, []
 
     def note_response(route):
         request = route.request
@@ -52,6 +54,17 @@ def main():
             return
         if url.hostname != "note.com":
             route.abort()
+            return
+        if not url.path.startswith("/api/"):
+            route.fulfill(status=200, content_type="text/html", body="<!doctype html><meta charset=utf-8><title>note fixture</title><h1>Signed-in note fixture</h1>")
+            return
+        frame_url = request.frame.url
+        headers = request.all_headers()
+        has_cookie = "nero_fixture_session=synthetic" in headers.get("cookie", "")
+        api_realms.append((frame_url, has_cookie))
+        if urlparse(frame_url).hostname != "note.com" or not has_cookie:
+            unexpected.append(("wrong request realm or missing session", frame_url))
+            route.fulfill(status=401, content_type="application/json", body='{"error":"same-origin session required"}')
             return
         payload = None
         if url.path == "/api/v2/current_user":
@@ -102,6 +115,9 @@ def main():
                     print("chromium-probe-ok: browser started; extension tests were not requested")
                     return 0
                 context.route("**/*", note_response)
+                context.add_cookies([{"name": "nero_fixture_session", "value": "synthetic", "url": "https://note.com", "httpOnly": True, "secure": True, "sameSite": "Lax"}])
+                note_page = context.new_page()
+                note_page.goto("https://note.com/fixture")
                 manifest = json.loads((extension / "manifest.json").read_text())
                 digest = hashlib.sha256(base64.b64decode(manifest["key"])).hexdigest()[:32]
                 extension_id = "".join(chr(ord("a") + int(char, 16)) for char in digest)
@@ -133,7 +149,8 @@ def main():
                 assert page.locator("#position").inner_text() == "1 / 3"
                 assert not errors, errors
                 assert not unexpected, unexpected
-                print("chrome-browser-smoke-ok: actual extension startup/CSP, unliked backfill, card preview, internal navigation/back, guarded article like and comment (all HTTP mocked)")
+                assert api_realms and all(urlparse(origin).hostname == "note.com" and cookie for origin, cookie in api_realms), api_realms
+                print("chrome-browser-smoke-ok: note-tab same-origin fetch with synthetic HttpOnly session, actual extension startup/CSP, unliked backfill, card preview, internal navigation/back, guarded article like and comment (all HTTP mocked)")
                 return 0
             finally:
                 context.close()

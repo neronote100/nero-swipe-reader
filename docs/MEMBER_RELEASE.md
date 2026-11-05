@@ -6,7 +6,7 @@ Chrome版の無料ZIP配布と導入・更新については [Chrome版の導入
 
 - ソース：`members/`、既存のnote API処理は`extension/`と整合性確認付き`packed/`からビルド時に取得。
 - ビルド：`npm run package:members`
-- 出力：`dist/firefox-members/`、`dist/nero-swipe-reader-0.5.0-unsigned.zip`
+- 出力：`dist/firefox-members/`、`dist/nero-swipe-reader-0.5.1-unsigned.zip`
 - 拡張ID：`swipe-reader@neronote100.github.io`。旧Bridgeとは別ID。
 - Firefox 140以上、Android版142以上。
 

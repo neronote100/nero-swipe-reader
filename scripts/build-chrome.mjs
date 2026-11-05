@@ -24,6 +24,7 @@ for (const file of ["icon.svg", "PRIVACY.md"])
   fs.copyFileSync(firefox + "/" + file, output + "/" + file);
 for (const file of [
   "platform.js",
+  "note-transport.js",
   "service-worker.js",
   "icon16.png",
   "icon32.png",
@@ -35,19 +36,35 @@ for (const file of [
   fs.copyFileSync("chrome/" + file, output + "/" + file);
 }
 
-const modules = [...memberManifest.background.scripts, "reader/app.js"].map(
-  (file) => {
-    const source = fs.readFileSync(firefox + "/" + file, "utf8");
-    return "\n// Source: " + file + "\n" + source + "\n;\n";
-  },
-);
+const engineFiles = memberManifest.background.scripts.flatMap((file) => [
+  { label: file, path: firefox + "/" + file },
+  ...(file === "member-api.js"
+    ? [{ label: "chrome/account.js", path: "chrome/account.js" }]
+    : []),
+]);
+engineFiles.push({ label: "reader/app.js", path: firefox + "/reader/app.js" });
+const modules = engineFiles.map(({ label, path: sourcePath }) => {
+  let source = fs.readFileSync(sourcePath, "utf8");
+  if (label === "background.js") {
+    const accountCall = "fetchNoteJson('/v2/current_user', 4000)";
+    if (!source.includes(accountCall))
+      throw new Error(
+        "Chrome account timeout patch no longer matches upstream",
+      );
+    source = source.replace(
+      accountCall,
+      "fetchNoteJson('/v2/current_user', 12000)",
+    );
+  }
+  return "\n// Source: " + label + "\n" + source + "\n;\n";
+});
 // The Chrome platform passes a lexical API facade. Do not overwrite the
 // native chrome/browser globals; the same source works before and after
 // Chrome introduced its browser namespace.
 const engine =
-  '(function(browser) {\n"use strict";\n' +
+  '(function(browser, fetch) {\n"use strict";\n' +
   modules.join("") +
-  "\n})(globalThis.NeroChromePlatform.browser);\n";
+  "\n})(globalThis.NeroChromePlatform.browser, globalThis.NeroChromePlatform.fetch);\n";
 fs.writeFileSync(output + "/reader/engine.js", engine);
 const indexPath = output + "/reader/index.html";
 const index = fs.readFileSync(indexPath, "utf8");
@@ -58,7 +75,10 @@ if (!index.includes(appScript))
   );
 fs.writeFileSync(
   indexPath,
-  index.replace(appScript, '<script src="../platform.js"></script>'),
+  index.replace(
+    appScript,
+    '<script src="../note-transport.js"></script>\n    <script src="../platform.js"></script>',
+  ),
 );
 if (fs.existsSync("docs/CHROME_INSTALL.md"))
   fs.copyFileSync("docs/CHROME_INSTALL.md", output + "/INSTALL.md");

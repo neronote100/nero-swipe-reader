@@ -1,6 +1,8 @@
 // Run the generated Chrome bundle, the shipped local Port transport, and the
 // real note API implementation together. HTTP replies and browser UI are
-// synthetic. This is a runtime integration check, not a Chromium layout test.
+// synthetic. Extension-origin fetch is intentionally blocked: HTTP must run
+// through the real transport inside a separate, persistent note top-frame VM.
+// This is a runtime integration check, not a Chromium layout test.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
@@ -101,6 +103,10 @@ const state = {
   engineLoads: 0,
   engineErrors: [],
   liked: new Set(["n0", "n1", "n2"]),
+  noteAvailable: true,
+  extensionFetchCalls: 0,
+  scriptCalls: [],
+  authStatus: 200,
 };
 function storageArea(data) {
   return {
@@ -121,6 +127,7 @@ function storageArea(data) {
     },
   };
 }
+let noteContext;
 const nativeChrome = {
   runtime: {
     id: extensionId,
@@ -147,20 +154,91 @@ const nativeChrome = {
       state.tabsUpdated.push({ id, changes });
       return { id, windowId: 2, ...changes };
     },
-    query: async () => [
-      { id: 10, windowId: 2, url: extensionUrl + "reader/index.html" },
-    ],
-    get: async (id) => ({
-      id,
-      windowId: 2,
-      url: extensionUrl + "reader/index.html",
-    }),
+    query: async (query = {}) => {
+      const patterns = Array.isArray(query.url)
+        ? query.url
+        : query.url
+          ? [query.url]
+          : [];
+      const reader = {
+        id: 10,
+        windowId: 2,
+        url: extensionUrl + "reader/index.html",
+        active: true,
+      };
+      const note = {
+        id: 20,
+        windowId: 2,
+        url: "https://note.com/fixture",
+        active: true,
+      };
+      if (patterns.some((url) => url.startsWith("https://note.com")))
+        return state.noteAvailable ? [note] : [];
+      if (patterns.some((url) => url.startsWith("chrome-extension:")))
+        return [reader];
+      return state.noteAvailable ? [reader, note] : [reader];
+    },
+    get: async (id) => {
+      if (id === 20) {
+        if (!state.noteAvailable) throw new Error("The note tab was closed");
+        return {
+          id,
+          windowId: 2,
+          url: "https://note.com/fixture",
+          active: true,
+        };
+      }
+      return { id, windowId: 2, url: extensionUrl + "reader/index.html" };
+    },
     create: async () => {
       throw new Error("Fixture operations must not launch note tabs");
     },
     remove: async () => {},
   },
   windows: { update: async () => ({}) },
+  permissions: {
+    contains: async (request) => {
+      assert.deepEqual(Array.from(request.permissions), ["scripting"]);
+      assert.deepEqual(Array.from(request.origins), ["https://note.com/*"]);
+      return true;
+    },
+  },
+  scripting: {
+    async executeScript(options) {
+      assert.equal(
+        options.target.tabId,
+        20,
+        "Only an existing note tab may receive API requests",
+      );
+      assert.deepEqual(
+        Array.from(options.target.frameIds),
+        [0],
+        "Only the note top frame may execute requests",
+      );
+      assert.equal(
+        options.world,
+        "ISOLATED",
+        "Site JavaScript must not become the transport",
+      );
+      assert.equal(state.noteAvailable, true);
+      state.scriptCalls.push({
+        tabId: options.target.tabId,
+        world: options.world,
+        name: options.func.name,
+      });
+      noteContext.__fixtureArgs = structuredClone(options.args || []);
+      const beforePosts = state.posts.length;
+      const result = await vm.runInContext(
+        "(" + options.func.toString() + ")(...__fixtureArgs)",
+        noteContext,
+      );
+      if (state.loseNextPostResult && state.posts.length > beforePosts) {
+        state.loseNextPostResult = false;
+        throw new Error("The note frame closed after accepting the request");
+      }
+      return [{ frameId: 0, result: structuredClone(result) }];
+    },
+  },
 };
 const elements = {};
 for (const match of fs
@@ -213,12 +291,11 @@ const sourceRows = Array.from({ length: 53 }, (_, i) => ({
   noteUrl: "https://note.com/writer_a/n/n" + i,
   user: { urlname: "writer_a", nickname: "Writer A" },
 }));
-const response = (payload, status = 200) => ({
-  ok: status >= 200 && status < 300,
-  status,
-  headers: { get: () => null },
-  json: async () => structuredClone(payload),
-});
+const response = (payload, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 async function fakeFetch(value, options = {}) {
   const url = new URL(value),
     method = options.method || "GET";
@@ -232,11 +309,16 @@ async function fakeFetch(value, options = {}) {
     "include",
     "All note operations must reuse only the browser session",
   );
-  state.calls.push({ url: url.href, method, body: options.body });
+  state.calls.push({
+    url: url.href,
+    method,
+    body: options.body,
+    realm: "note-top-frame",
+  });
   if (url.pathname === "/api/v2/current_user")
-    return response({
-      data: { key: state.owner + "-key", urlname: state.owner },
-    });
+    return state.authStatus === 200
+      ? response({ data: { key: state.owner + "-key", urlname: state.owner } })
+      : response({ error: { message: "Session expired" } }, state.authStatus);
   if (url.pathname === "/api/v2/creators/writer_a/contents") {
     if (state.holdPage) {
       const wait = state.holdPage;
@@ -274,7 +356,7 @@ async function fakeFetch(value, options = {}) {
       state.liked.add(like[1]);
       return response({ data: {} });
     }
-    if (/^\/api\/v3\/notes\/nlinked\/note_comments$/.test(url.pathname))
+    if (/^\/api\/v3\/notes\/n[\w-]+\/note_comments$/.test(url.pathname))
       return response({ data: { key: "fixture-posted-comment" } });
   }
   throw new Error(
@@ -282,6 +364,49 @@ async function fakeFetch(value, options = {}) {
   );
 }
 const timers = new Set();
+const timed = (fn, delay) => {
+  const timer = setTimeout(fn, delay);
+  timer.unref();
+  timers.add(timer);
+  return timer;
+};
+const clearTimed = (timer) => {
+  clearTimeout(timer);
+  timers.delete(timer);
+};
+noteContext = vm.createContext({
+  location: {
+    href: "https://note.com/fixture",
+    origin: "https://note.com",
+    protocol: "https:",
+    hostname: "note.com",
+  },
+  document: {
+    get cookie() {
+      throw new Error("The transport must never read Cookie contents");
+    },
+  },
+  URL,
+  URLSearchParams,
+  Headers,
+  Response,
+  AbortController,
+  TextEncoder,
+  TextDecoder,
+  crypto: webcrypto,
+  structuredClone,
+  queueMicrotask,
+  console,
+  setTimeout: timed,
+  clearTimeout: clearTimed,
+  fetch: async (value, options) => {
+    const url = new URL(value, "https://note.com/fixture");
+    const reply = await fakeFetch(url.href, options);
+    Object.defineProperty(reply, "url", { value: url.href });
+    return reply;
+  },
+});
+vm.runInContext("self = top = window = globalThis", noteContext);
 context = vm.createContext({
   chrome: nativeChrome,
   browser: nativeChrome,
@@ -306,11 +431,19 @@ context = vm.createContext({
   URLSearchParams,
   AbortController,
   TextEncoder,
+  TextDecoder,
+  Headers,
+  Response,
   Blob,
   crypto: webcrypto,
   structuredClone,
   queueMicrotask,
-  fetch: fakeFetch,
+  fetch: async () => {
+    state.extensionFetchCalls++;
+    throw new TypeError(
+      "Extension-origin note cookies are blocked in this fixture",
+    );
+  },
   console,
   setTimeout(fn, delay) {
     const timer = setTimeout(fn, delay);
@@ -328,6 +461,9 @@ context = vm.createContext({
 try {
   vm.runInContext(fs.readFileSync(out + "reader/model.js", "utf8"), context);
   vm.runInContext(fs.readFileSync(out + "reader/body.js", "utf8"), context);
+  vm.runInContext(fs.readFileSync(out + "note-transport.js", "utf8"), context, {
+    filename: "note-transport.js",
+  });
   const platformPath = fs.existsSync(out + "platform.js")
     ? out + "platform.js"
     : out + "reader/platform.js";
@@ -348,6 +484,7 @@ try {
     "Native browser namespace must not be replaced",
   );
   assert.equal(state.runtimeConnectCalls, 0);
+  assert.equal(state.extensionFetchCalls, 0);
   await waitFor(
     () => elements.account.textContent === "接続中 @alice",
     "Real reader health request did not complete",
@@ -475,6 +612,69 @@ try {
   assert.equal(state.posts.length, postCount);
   state.owner = "alice";
 
+  // An executeScript rejection can happen after note accepted a POST. The
+  // transport must not automatically replay it, and the receipt stays unknown.
+  state.loseNextPostResult = true;
+  const unknownArgs = {
+    ...commentArgs,
+    articleUrl: "https://note.com/writer_b/n/nunknown",
+    comment: "Unknown bridge response",
+  };
+  const beforeUnknown = state.posts.length;
+  const unknown = await rpc("note_action", unknownArgs);
+  assert.equal(unknown.ok, false);
+  assert.equal(
+    state.posts.length,
+    beforeUnknown + 1,
+    "A lost bridge reply must never retry a POST",
+  );
+  const heldUnknown = await rpc("note_action", unknownArgs);
+  assert.equal(heldUnknown.code, "comment_result_unknown");
+  assert.equal(state.posts.length, beforeUnknown + 1);
+
+  // A login tab is required. Missing tabs and expired sessions must produce a
+  // failed account check, rather than silently falling back to extension fetch.
+  for (const status of [401, 403]) {
+    state.authStatus = status;
+    const health = await rpc("health");
+    assert.equal(health.noteOk, false);
+    assert.equal(health.owner, "");
+    assert.match(
+      health.noteError,
+      status === 403 ? /拒否/ : /Chrome.*note|note.*タブ/,
+    );
+    await elements.connect.click();
+    assert.equal(elements.account.textContent, "noteとの接続を確認できません");
+    assert.equal(
+      elements.notice.textContent,
+      health.noteError,
+      "The account error must reach the real reader UI",
+    );
+  }
+  state.authStatus = 200;
+  state.noteAvailable = false;
+  const beforeMissingTab = state.calls.length;
+  const missingTab = await rpc("health");
+  assert.equal(missingTab.noteOk, false);
+  assert.equal(missingTab.owner, "");
+  assert.match(missingTab.noteError, /note.*タブ/);
+  await elements.connect.click();
+  assert.match(elements.notice.textContent, /同じChrome.*note.*タブ/);
+  assert.equal(
+    state.calls.length,
+    beforeMissingTab,
+    "No API call may run without an existing note tab",
+  );
+  state.noteAvailable = true;
+  assert.equal((await rpc("health")).owner, "alice");
+  await elements.connect.click();
+  assert.equal(elements.account.textContent, "接続中 @alice");
+  assert.equal(
+    elements.watchCount.textContent,
+    "1",
+    "A failed account check must not erase the saved watchlist",
+  );
+
   let releasePage;
   state.holdPage = new Promise((resolve) => {
     releasePage = resolve;
@@ -502,8 +702,15 @@ try {
     0,
     "Jobs must stay independent of native worker Port lifetime",
   );
+  assert.equal(
+    state.extensionFetchCalls,
+    0,
+    "The extension global fetch must never bypass the note tab",
+  );
+  assert.ok(state.scriptCalls.length > 10);
+  assert.ok(state.calls.every((call) => call.realm === "note-top-frame"));
   console.log(
-    "chrome-runtime-integration-check-ok: generated UI/engine startup, native namespace isolation, local Port progress and cancellation, three/deep-fifty backfill, include-liked, canonical metadata, guarded mutations and durable deduplication",
+    "chrome-runtime-integration-check-ok: same-origin note-tab transport, blocked extension fetch, no POST retry, missing tab and 401/403 handling, generated UI/engine startup, native namespace isolation, local Port progress and cancellation, three/deep-fifty backfill, include-liked, canonical metadata, guarded mutations and durable deduplication",
   );
 } finally {
   for (const fn of state.globals.get("pagehide") || [])

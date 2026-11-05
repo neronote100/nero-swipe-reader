@@ -17,7 +17,7 @@ const member = JSON.parse(fs.readFileSync("members/manifest.json", "utf8"));
 const template = JSON.parse(fs.readFileSync("chrome/manifest.json", "utf8"));
 assert.equal(manifest.manifest_version, 3);
 assert.equal(manifest.version, member.version);
-assert.deepEqual(manifest.permissions, ["storage"]);
+assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
 assert.deepEqual(manifest.host_permissions, ["https://note.com/*"]);
 assert.equal(manifest.browser_specific_settings, undefined);
 assert.equal(manifest.browser_action, undefined);
@@ -47,6 +47,11 @@ const extensionId = createHash("sha256")
     String.fromCharCode(97 + parseInt(value, 16)),
   );
 assert.match(extensionId, /^[a-p]{32}$/);
+assert.equal(
+  extensionId,
+  "fcopjoegochallbjmkmllabgdcmhpdng",
+  "updates must preserve the installed Chrome identity",
+);
 assert.match(
   manifest.content_security_policy.extension_pages,
   /connect-src https:\/\/note\.com(?:;|$)/,
@@ -77,6 +82,8 @@ for (const [size, file] of Object.entries(manifest.icons)) {
 }
 const index = fs.readFileSync(root + "/reader/index.html", "utf8");
 assert.match(index, /<script src="\.\.\/platform\.js"><\/script>/);
+assert.match(index, /<script src="\.\.\/note-transport\.js"><\/script>/);
+assert.ok(index.indexOf("note-transport.js") < index.indexOf("platform.js"));
 assert.doesNotMatch(index, /<script src="app\.js">/);
 for (const match of index.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*>/g)) {
   assert.doesNotMatch(match[1], /^(?:https?:)?\/\//);
@@ -87,7 +94,12 @@ if (fs.existsSync("docs/CHROME_INSTALL.md"))
     fs.readFileSync(root + "/INSTALL.md", "utf8"),
     fs.readFileSync("docs/CHROME_INSTALL.md", "utf8"),
   );
-for (const file of ["service-worker.js", "platform.js", "reader/engine.js"]) {
+for (const file of [
+  "service-worker.js",
+  "platform.js",
+  "note-transport.js",
+  "reader/engine.js",
+]) {
   const source = fs.readFileSync(root + "/" + file, "utf8");
   new vm.Script(source, { filename: file });
   assert.doesNotMatch(source, /\beval\s*\(|new Function\s*\(/);
@@ -107,6 +119,16 @@ assert.ok(
   fs
     .readFileSync(root + "/reader/engine.js", "utf8")
     .includes("globalThis.NeroChromePlatform.browser"),
+);
+assert.ok(
+  fs
+    .readFileSync(root + "/reader/engine.js", "utf8")
+    .includes("globalThis.NeroChromePlatform.fetch"),
+);
+assert.ok(
+  fs
+    .readFileSync(root + "/reader/engine.js", "utf8")
+    .includes("// Source: chrome/account.js"),
 );
 for (const file of directoryFiles(root))
   assert.doesNotMatch(

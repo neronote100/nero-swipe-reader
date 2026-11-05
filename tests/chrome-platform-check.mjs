@@ -157,6 +157,7 @@ function harness({
   load = "success",
   lockManager = state.locks,
   nativeMissing = false,
+  transport = "ready",
 } = {}) {
   const m = chromeMock(state, tabId);
   const document = {
@@ -174,11 +175,39 @@ function harness({
   };
   const pageEvents = events(),
     errors = [],
-    oldBrowser = { nativeBrowser: true };
+    oldBrowser = { nativeBrowser: true },
+    transportRequests = [];
+  let transportCreations = 0,
+    nativeFetchCalls = 0;
+  const transportRecord = {
+    fetch(input, options) {
+      assert.equal(this, transportRecord);
+      transportRequests.push({ input, options });
+      return Promise.resolve({ ok: true, source: "note-tab" });
+    },
+  };
+  const transportFactory =
+    transport === "missing"
+      ? undefined
+      : {
+          create(instance) {
+            transportCreations++;
+            assert.equal(instance, m.native);
+            if (transport === "throws")
+              throw Error("transport fixture init failed");
+            return transport === "invalid" ? {} : transportRecord;
+          },
+        };
+  const nativeFetch = () => {
+    nativeFetchCalls++;
+    throw Error("Native fetch must remain unused");
+  };
   let reloads = 0;
   const ctx = vm.createContext({
     chrome: nativeMissing ? undefined : m.native,
     browser: oldBrowser,
+    NeroChromeNoteTransport: transportFactory,
+    fetch: nativeFetch,
     navigator: { locks: lockManager },
     document,
     crypto: webcrypto,
@@ -204,6 +233,10 @@ function harness({
     document,
     pageEvents,
     oldBrowser,
+    nativeFetch,
+    nativeFetchCalls: () => nativeFetchCalls,
+    transportRequests,
+    transportCreations: () => transportCreations,
     reloads: () => reloads,
   };
 }
@@ -220,6 +253,25 @@ function harness({
   assert.equal(h.scripts[0].src, origin + "reader/engine.js");
   assert.equal(h.ctx.browser, h.oldBrowser);
   assert.equal(h.ctx.chrome, h.m.native);
+  assert.equal(h.ctx.fetch, h.nativeFetch);
+  assert.equal(h.transportCreations(), 1);
+  const requestOptions = { method: "GET", credentials: "include" };
+  assert.equal(
+    (
+      await h.platform.fetch(
+        "https://note.com/api/v2/current_user",
+        requestOptions,
+      )
+    ).source,
+    "note-tab",
+  );
+  assert.equal(h.transportRequests.length, 1);
+  assert.equal(
+    h.transportRequests[0].input,
+    "https://note.com/api/v2/current_user",
+  );
+  assert.equal(h.transportRequests[0].options, requestOptions);
+  assert.equal(h.nativeFetchCalls(), 0);
   assert.notEqual(h.platform.browser, h.ctx.browser);
   assert.equal(h.platform.browser.storage, h.m.native.storage);
   assert.equal(
@@ -368,6 +420,16 @@ function harness({
 
 // Startup failures fail closed, while tab closure resolves readiness even
 // during loading or before DOMContentLoaded.
+for (const transport of ["missing", "throws", "invalid"]) {
+  const h = harness({ transport });
+  assert.equal((await h.platform.ready).code, "transport_unavailable");
+  assert.equal(h.platform.fetch, null);
+  assert.equal(h.scripts.length, 0);
+  assert.equal(h.state.locks.held.size, 0);
+  assert.equal(h.nativeFetchCalls(), 0);
+  assert.match(h.document.body.textContent, /拡張機能を読み込み直して/);
+  assert.throws(() => h.platform.browser.runtime.connect({}), /closed/);
+}
 for (const missing of ["browser", "locks"]) {
   const h = harness({
     nativeMissing: missing === "browser",

@@ -96,6 +96,7 @@
     $("connect").disabled = true;
     try {
       const h = await rpc("health");
+      const noteError = globalThis.NeroChromePlatform ? h.noteError : "";
       // A diagnosis started earlier must not replace the account mid-send.
       if (sending || scanning) return;
       const next = h.noteOk ? h.owner : "";
@@ -124,7 +125,9 @@
       }
       $("account").textContent = owner
         ? "接続中 @" + owner
-        : "noteにログインしてください";
+        : noteError
+          ? "noteとの接続を確認できません"
+          : "noteにログインしてください";
       if (owner) {
         const r = await rpc("inbox_status", { owner });
         inbox = r.items || [];
@@ -133,7 +136,8 @@
         notice("");
       } else
         notice(
-          "このブラウザーでnoteにログインしてから「再確認」を押してください。",
+          noteError ||
+            "このブラウザーでnoteにログインしてから「再確認」を押してください。",
         );
     } catch (e) {
       notice(e.message);

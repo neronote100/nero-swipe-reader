@@ -166,6 +166,24 @@
       })
     : null;
 
+  // The Chrome build supplies note requests from an existing note tab. Never
+  // fall back to the extension page's native fetch when that adapter is absent.
+  let noteTransport = null;
+  if (
+    native?.runtime &&
+    typeof globalThis.NeroChromeNoteTransport?.create === "function"
+  ) {
+    try {
+      noteTransport = globalThis.NeroChromeNoteTransport.create(native);
+    } catch {
+      /* Startup reports an unavailable transport before loading the engine. */
+    }
+  }
+  const noteFetch =
+    typeof noteTransport?.fetch === "function"
+      ? (input, options) => noteTransport.fetch(input, options)
+      : null;
+
   async function savedReader() {
     try {
       return (await native.storage.session.get(ACTIVE_READER_KEY))[
@@ -304,6 +322,15 @@
       settleStarted({ ok: false, code: "unsupported_browser" });
       return started;
     }
+    if (!noteFetch) {
+      showMessage(
+        "リーダーを起動できませんでした",
+        "拡張機能を読み込み直してから、このタブを再読み込みしてください。",
+      );
+      stopped = true;
+      settleStarted({ ok: false, code: "transport_unavailable" });
+      return started;
+    }
     Promise.resolve()
       .then(() =>
         navigator.locks.request(
@@ -379,6 +406,7 @@
   });
   const platform = {
     browser,
+    fetch: noteFetch,
     start,
     focusExistingReader,
     ACTIVE_READER_KEY,
