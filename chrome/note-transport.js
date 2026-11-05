@@ -15,6 +15,48 @@
   const POST_PATH =
     /^\/api\/v3\/notes\/n[a-zA-Z0-9_-]+\/(?:likes|note_comments(?:\/[a-zA-Z0-9_-]+\/likes)?)$/;
 
+  function validHashtagRequest(url, rawPath, rawValue) {
+    const raw = rawPath.match(/^\/api\/v3\/hashtags\/([^/]+)\/notes$/);
+    const parsed = url.pathname.match(/^\/api\/v3\/hashtags\/([^/]+)\/notes$/);
+    if (
+      !raw ||
+      !parsed ||
+      /[\p{White_Space}\p{Cc}\p{Cf}\uD800-\uDFFF\\]/u.test(rawValue)
+    )
+      return false;
+    let tag, parsedTag;
+    try {
+      tag = decodeURIComponent(raw[1]);
+      parsedTag = decodeURIComponent(parsed[1]);
+    } catch {
+      return false;
+    }
+    if (
+      !tag ||
+      tag !== parsedTag ||
+      tag !== tag.normalize("NFC") ||
+      Array.from(tag).length > 80 ||
+      tag === "." ||
+      tag === ".." ||
+      /[\p{White_Space}\p{Cc}\p{Cf}\uD800-\uDFFF#＃/\\]/u.test(tag)
+    )
+      return false;
+    const entries = Array.from(url.searchParams);
+    if (
+      entries.length !== 2 ||
+      entries.filter(([name]) => name === "order").length !== 1 ||
+      entries.filter(([name]) => name === "page").length !== 1
+    )
+      return false;
+    const page = url.searchParams.get("page");
+    return (
+      url.searchParams.get("order") === "new" &&
+      /^[1-9]\d{0,3}$/.test(page) &&
+      String(Number(page)) === page &&
+      Number(page) <= 1000
+    );
+  }
+
   function failure(code, message) {
     return Object.assign(new Error(message), { code });
   }
@@ -33,9 +75,13 @@
     }
   }
   function prepare(value, options = {}) {
+    const rawValue = String(value);
+    const rawPath = rawValue
+      .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, "")
+      .split(/[?#]/, 1)[0];
     let url;
     try {
-      url = new URL(String(value));
+      url = new URL(rawValue);
     } catch {
       /* checked below */
     }
@@ -49,7 +95,12 @@
       url.hash ||
       url.href.length > 8192 ||
       !["GET", "POST"].includes(method) ||
-      !(method === "GET" ? GET_PATH : POST_PATH).test(url.pathname)
+      !(method === "GET"
+        ? url.pathname.startsWith("/api/v3/hashtags/") ||
+          rawPath.startsWith("/api/v3/hashtags/")
+          ? validHashtagRequest(url, rawPath, rawValue)
+          : GET_PATH.test(url.pathname)
+        : POST_PATH.test(url.pathname))
     )
       throw failure(
         "note_request_blocked",
@@ -114,6 +165,49 @@
       /^\/api\/(?:v2\/current_user|v2\/creators\/[a-zA-Z0-9_-]{1,80}(?:\/contents)?|v[23]\/notes\/n[a-zA-Z0-9_-]+(?:\/likes|\/note_comments)?|v3\/searches)$/;
     const postPath =
       /^\/api\/v3\/notes\/n[a-zA-Z0-9_-]+\/(?:likes|note_comments(?:\/[a-zA-Z0-9_-]+\/likes)?)$/;
+    function validHashtagRequest(url, rawPath, rawValue) {
+      const raw = rawPath.match(/^\/api\/v3\/hashtags\/([^/]+)\/notes$/);
+      const parsed = url.pathname.match(
+        /^\/api\/v3\/hashtags\/([^/]+)\/notes$/,
+      );
+      if (
+        !raw ||
+        !parsed ||
+        /[\p{White_Space}\p{Cc}\p{Cf}\uD800-\uDFFF\\]/u.test(rawValue)
+      )
+        return false;
+      let tag, parsedTag;
+      try {
+        tag = decodeURIComponent(raw[1]);
+        parsedTag = decodeURIComponent(parsed[1]);
+      } catch {
+        return false;
+      }
+      if (
+        !tag ||
+        tag !== parsedTag ||
+        tag !== tag.normalize("NFC") ||
+        Array.from(tag).length > 80 ||
+        tag === "." ||
+        tag === ".." ||
+        /[\p{White_Space}\p{Cc}\p{Cf}\uD800-\uDFFF#＃/\\]/u.test(tag)
+      )
+        return false;
+      const entries = Array.from(url.searchParams);
+      if (
+        entries.length !== 2 ||
+        entries.filter(([name]) => name === "order").length !== 1 ||
+        entries.filter(([name]) => name === "page").length !== 1
+      )
+        return false;
+      const page = url.searchParams.get("page");
+      return (
+        url.searchParams.get("order") === "new" &&
+        /^[1-9]\d{0,3}$/.test(page) &&
+        String(Number(page)) === page &&
+        Number(page) <= 1000
+      );
+    }
     const allowed = new Set([
       "accept",
       "content-type",
@@ -131,6 +225,8 @@
     } catch {
       /* checked below */
     }
+    const rawPath =
+      typeof input?.path === "string" ? input.path.split(/[?#]/, 1)[0] : "";
     if (
       !input ||
       typeof input.id !== "string" ||
@@ -144,7 +240,12 @@
       url.password ||
       url.hash ||
       !["GET", "POST"].includes(input.method) ||
-      !(input.method === "GET" ? getPath : postPath).test(url.pathname)
+      !(input.method === "GET"
+        ? url.pathname.startsWith("/api/v3/hashtags/") ||
+          rawPath.startsWith("/api/v3/hashtags/")
+          ? validHashtagRequest(url, rawPath, input.path)
+          : getPath.test(url.pathname)
+        : postPath.test(url.pathname))
     )
       return resultError(
         "note_request_blocked",

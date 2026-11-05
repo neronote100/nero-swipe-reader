@@ -90,6 +90,33 @@
             OFFなら未スキ記事を最大50本、ONならスキ済みを含む最新50本を探します。
           </p>
         </details>
+        <details id="hashtagSection">
+          <summary>ハッシュタグで企画・イベント記事を探す</summary>
+          <label for="hashtagInput">ハッシュタグを1つ</label>
+          <input
+            id="hashtagInput"
+            maxlength="1000"
+            placeholder="例：#王子の城下町"
+          />
+          <label for="hashtagLimit">取得する記事の上限</label>
+          <select id="hashtagLimit">
+            <option value="50">50本</option>
+            <option value="100" selected>100本</option>
+            <option value="200">200本</option>
+          </select>
+          <label class="feed-toggle"
+            ><input
+              id="hashtagIncludeLiked"
+              type="checkbox"
+            />スキ済みの記事も含める</label
+          >
+          <button id="hashtagFetch" class="primary wide" type="button">
+            このタグの記事を取得
+          </button>
+          <p class="muted">
+            このタグが実際に付いた公開記事を、新しいものから探します。ウォッチリスト以外の人の記事も対象です。
+          </p>
+        </details>
         <button id="cancelFeed" class="wide" hidden>記事取得を中断</button>
         <progress id="feedProgress" hidden></progress>
         <p id="feedStatus" class="muted">
@@ -114,6 +141,16 @@
           <span class="eyebrow" id="readerListName">WATCHLIST / RANDOM</span
           ><span id="position">0 / 0</span>
         </div>
+        <label class="article-order" for="articleOrder"
+          >並び順<select id="articleOrder">
+            <option value="random">ランダム</option>
+            <option value="date_desc">投稿日時：新しい順（降順）</option>
+            <option value="date_asc">投稿日時：古い順（昇順）</option>
+          </select></label
+        >
+        <p class="muted order-help">
+          取得した記事を投稿日時の秒まで比較します。並べ替えで取得範囲は変わりません。日時不明の記事は最後に表示します。
+        </p>
         <button id="articleBack" class="article-back" type="button" hidden>
           ← リンク元へ戻る
         </button>

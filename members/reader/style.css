@@ -561,3 +561,29 @@ textarea {
     font-size: 12px;
   }
 }
+
+#hashtagSection {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 16px;
+}
+#hashtagSection label[for] {
+  margin-top: 12px;
+}
+.article-order {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 0;
+  font-size: 12px;
+}
+.article-order select {
+  flex: 1;
+  width: auto;
+}
+.order-help {
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 8px 0 0;
+}

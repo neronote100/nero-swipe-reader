@@ -551,6 +551,178 @@ for (const incognito of [false, true]) {
     code: "note_response_too_large",
   });
 }
+// Hashtag acquisition is one narrow GET endpoint. Validate the Unicode tag
+// and pagination on both sides of the Chrome injection boundary.
+const hashtagUrl = (tag, page = 1) =>
+  "https://note.com/api/v3/hashtags/" +
+  encodeURIComponent(tag) +
+  "/notes?order=new&page=" +
+  page;
+for (const tag of ["生成AI", "AI_2026", "100%AI", "é", "🐟".repeat(80)]) {
+  const h = harness();
+  const payload = {
+    data: {
+      notes: [
+        {
+          key: "nhashtag",
+          name: "Synthetic tagged article",
+          user: { urlname: "synthetic_author" },
+        },
+      ],
+      count: 1,
+      next_page: 2,
+      is_last_page: false,
+    },
+  };
+  h.fetchImpl = async () =>
+    new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  const url = hashtagUrl(tag, tag === "生成AI" ? 1 : 1000);
+  const response = await h.api.fetch(url);
+  assert.deepEqual(
+    await response.json(),
+    payload,
+    "hashtag response metadata must pass through unchanged",
+  );
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].url, url);
+  assert.equal(h.calls[0].options.method, "GET");
+}
+{
+  const h = harness();
+  await h.api.fetch(account);
+  const before = h.calls.length;
+  const segments = [
+    "",
+    "%",
+    "%zz",
+    "%FF",
+    "%E3%81",
+    "%ED%A0%80",
+    "%2F",
+    "%5C",
+    "a%2Fb",
+    "a%5Cb",
+    "%23AI",
+    "%EF%BC%83AI",
+    "AI%20tag",
+    "%00",
+    "%0A",
+    "%C2%85",
+    "%E2%80%8D",
+    "%E2%80%8F",
+    "%2e",
+    "%2e%2e",
+    ".",
+    "..",
+    "a/b",
+    "a\\b",
+    "a\ud800b",
+    encodeURIComponent("e\u0301"),
+    encodeURIComponent("あ".repeat(81)),
+  ];
+  const paths = segments.map(
+    (tag) => "/api/v3/hashtags/" + tag + "/notes?order=new&page=1",
+  );
+  paths.push(
+    "/api/v3/hashtags/../notes/nescape?order=new&page=1",
+    "/api/v3/hashtags/%2e%2e/notes/nescape?order=new&page=1",
+    "/api/v3/hashtags/a/../../notes/nescape?order=new&page=1",
+    "/api/v3/hashtags/AI/notes/?order=new&page=1",
+    "/api/v3/hashtags/AI/notes/more?order=new&page=1",
+  );
+  const basePath = "/api/v3/hashtags/AI/notes";
+  for (const query of [
+    "",
+    "?order=new",
+    "?page=1",
+    "?order=popular&page=1",
+    "?order=hot&page=1",
+    "?order=new&page=0",
+    "?order=new&page=-1",
+    "?order=new&page=1001",
+    "?order=new&page=01",
+    "?order=new&page=1.0",
+    "?order=new&page=1e0",
+    "?order=new&page=",
+    "?order=new&page=Infinity",
+    "?order=new&page=99999",
+    "?order=new&page=1&order=new",
+    "?order=new&page=1&page=1",
+    "?o%72der=new&order=new&page=1",
+    "?order=new&page=1&extra=value",
+    "?Order=new&page=1",
+    "?order=new&offset=1",
+    "?order=new&page=1\n",
+    "?order=new&page=1%0A",
+    "?order=new&page=1%0D",
+    "?order=new&page=1%09",
+    "?order=new&page=1%E2%80%A8",
+  ])
+    paths.push(basePath + query);
+  for (const path of paths) {
+    await assert.rejects(
+      h.api.fetch("https://note.com" + path),
+      { code: "note_request_blocked" },
+      "client must reject " + JSON.stringify(path),
+    );
+    const response = await h.page({
+      id: "tag_guard",
+      expiresAt: h.now + 12000,
+      path,
+      method: "GET",
+      headers: {},
+    });
+    assert.equal(
+      response.code,
+      "note_request_blocked",
+      "injected function must independently reject " + JSON.stringify(path),
+    );
+  }
+  for (const method of ["POST", "DELETE", "PUT", "PATCH"]) {
+    const path = "/api/v3/hashtags/AI/notes?order=new&page=1";
+    await assert.rejects(h.api.fetch("https://note.com" + path, { method }), {
+      code: "note_request_blocked",
+    });
+    assert.equal(
+      (
+        await h.page({
+          id: "tag_method",
+          expiresAt: h.now + 12000,
+          path,
+          method,
+          headers: {},
+        })
+      ).code,
+      "note_request_blocked",
+    );
+  }
+  await assert.rejects(
+    h.api.fetch(
+      "https://evil.example/api/v3/hashtags/AI/notes?order=new&page=1",
+    ),
+    { code: "note_request_blocked" },
+  );
+  assert.equal(
+    (
+      await h.page({
+        id: "tag_origin",
+        expiresAt: h.now + 12000,
+        path: "https://evil.example/api/v3/hashtags/AI/notes?order=new&page=1",
+        method: "GET",
+        headers: {},
+      })
+    ).code,
+    "note_request_blocked",
+  );
+  assert.equal(
+    h.calls.length,
+    before,
+    "invalid hashtag requests must never reach HTTP on either side",
+  );
+}
 console.log(
-  "chrome-note-transport-check-ok: same-origin isolated fetch, pinned tabs, API/header guards, HTTP diagnostics, no credential export, bounded responses, real abort, absolute request expiry, normal/private session matching and no mutation retries",
+  "chrome-note-transport-check-ok: same-origin isolated fetch, pinned tabs, API/header guards, HTTP diagnostics, no credential export, bounded responses, real abort, absolute request expiry, normal/private session matching, narrow Unicode hashtag GET guards and no mutation retries",
 );

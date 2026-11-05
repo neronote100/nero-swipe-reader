@@ -8,6 +8,9 @@
     owner = "",
     data = M.normalizeData(null, ""),
     rows = [],
+    baseRows = [],
+    feedSource = "",
+    feedResult = null,
     index = 0,
     articleSeq = 0,
     linkedArticle = null,
@@ -165,6 +168,9 @@
         rpc("cancel_job", { kind: "watch_feed" }).catch(() => {});
     }
     rows = [];
+    baseRows = [];
+    feedSource = "";
+    feedResult = null;
     index = 0;
     resetArticleNavigation();
     renderArticle();
@@ -182,7 +188,7 @@
       $("watchSelect").append(option);
     }
     $("watchCount").textContent = String(list.users.length);
-    $("readerListName").textContent = list.name + " / RANDOM";
+    renderFeedLabel();
     $("listStatus").textContent =
       `登録 ${list.users.length}人` +
       (list.pending.length ? `・ID未照合 ${list.pending.length}人` : "") +
@@ -330,6 +336,10 @@
     $("feedIncludeLiked").checked = data.feedOptions.includeLiked;
     $("deepIncludeLiked").checked = data.feedOptions.deepIncludeLiked;
     $("deepCreator").value = data.feedOptions.deepCreator;
+    $("articleOrder").value = data.feedOptions.articleOrder;
+    $("hashtagInput").value = data.feedOptions.hashtag;
+    $("hashtagIncludeLiked").checked = data.feedOptions.hashtagIncludeLiked;
+    $("hashtagLimit").value = String(data.feedOptions.hashtagLimit);
   }
   $("feedIncludeLiked").onchange = async () => {
     if (!requireOwner()) return;
@@ -352,14 +362,88 @@
     data.feedOptions.deepCreator = M.watchName($("deepCreator").value);
     await save();
   };
+  function renderFeedLabel() {
+    $("readerListName").textContent =
+      (feedSource || M.activeList(data).name) +
+      " / " +
+      M.orderLabel(data.feedOptions.articleOrder);
+  }
+  function renderFeedStatus() {
+    if (!feedResult) return;
+    const r = feedResult;
+    $("feedStatus").textContent =
+      `${r.cancelled ? "中断：" : ""}${rows.length}件を${M.orderLabel(data.feedOptions.articleOrder)}で表示 / ${r.includeLiked ? "スキ済みを含む" : "未スキのみ"}` +
+      (!r.includeLiked ? ` / スキ済み ${r.likedCount || 0}件をスキップ` : "") +
+      (r.statusFailedCount
+        ? ` / スキ状態不明 ${r.statusFailedCount}件を除外`
+        : "") +
+      (r.failedCreators?.length
+        ? ` / 取得失敗 ${r.failedCreators.length}人`
+        : "") +
+      (r.emptyCreators?.length
+        ? ` / 記事なし ${r.emptyCreators.length}人`
+        : "") +
+      (r.shortfallCreators?.length
+        ? ` / 目標本数に満たない人 ${r.shortfallCreators.length}人`
+        : "") +
+      (r.limitReachedCreators?.length
+        ? ` / 探索上限 ${r.limitReachedCreators.length}人（途中結果）`
+        : "") +
+      (r.mode === "hashtag" ? ` / #${r.hashtag}・上限${r.limit}本` : "") +
+      (r.mode === "hashtag" && r.hasMore
+        ? " / 未取得の記事が残る可能性があります"
+        : "") +
+      (r.mode === "hashtag" && r.partial ? " / 途中結果" : "") +
+      (r.notFound ? " / タグが見つからないか、公開記事がありません" : "") +
+      (r.message ? " / " + r.message : "");
+  }
+  $("articleOrder").onchange = async () => {
+    if (!requireOwner()) return;
+    const current = rows[index];
+    data.feedOptions.articleOrder = M.articleOrder($("articleOrder").value);
+    rows = M.orderArticles(baseRows, data.feedOptions.articleOrder);
+    index = Math.max(0, rows.indexOf(current));
+    renderFeedLabel();
+    renderReaderControls();
+    if (!feeding) renderFeedStatus();
+    await save();
+  };
+  $("hashtagInput").oninput = () => resetFeed();
+  $("hashtagInput").onchange = async () => {
+    resetFeed();
+    if (!owner) return;
+    data.feedOptions.hashtag = M.hashtagName($("hashtagInput").value);
+    await save();
+  };
+  $("hashtagIncludeLiked").onchange = async () => {
+    if (!requireOwner()) return;
+    data.feedOptions.hashtagIncludeLiked = $("hashtagIncludeLiked").checked;
+    resetFeed();
+    await save();
+  };
+  $("hashtagLimit").onchange = async () => {
+    if (!requireOwner()) return;
+    const value = Number($("hashtagLimit").value);
+    data.feedOptions.hashtagLimit = [50, 100, 200].includes(value)
+      ? value
+      : 100;
+    resetFeed();
+    await save();
+  };
   async function fetchArticles(mode) {
     if (!requireOwner() || feeding) return;
     const list = M.activeList(data),
-      creator = mode === "deep" ? M.watchName($("deepCreator").value) : "";
+      creator = mode === "deep" ? M.watchName($("deepCreator").value) : "",
+      hashtag =
+        mode === "hashtag" ? M.hashtagName($("hashtagInput").value) : "";
     if (mode === "deep" && !creator) {
       notice(
         "深掘りする人のnoteユーザー名かプロフィールURLを入力してください。",
       );
+      return;
+    }
+    if (mode === "hashtag" && !hashtag) {
+      notice("ハッシュタグを1つ入力してください。例：#王子の城下町");
       return;
     }
     if (mode === "watch" && !list.users.length) {
@@ -372,40 +456,62 @@
     const includeLiked =
       mode === "deep"
         ? $("deepIncludeLiked").checked
-        : $("feedIncludeLiked").checked;
-    data.feedOptions.includeLiked = $("feedIncludeLiked").checked;
-    data.feedOptions.deepIncludeLiked = $("deepIncludeLiked").checked;
+        : mode === "hashtag"
+          ? $("hashtagIncludeLiked").checked
+          : $("feedIncludeLiked").checked;
+    const limitValue = Number($("hashtagLimit").value),
+      limit = [50, 100, 200].includes(limitValue) ? limitValue : 100;
+    Object.assign(data.feedOptions, {
+      includeLiked: $("feedIncludeLiked").checked,
+      deepIncludeLiked: $("deepIncludeLiked").checked,
+      hashtagIncludeLiked: $("hashtagIncludeLiked").checked,
+      hashtagLimit: limit,
+    });
     if (mode === "deep") data.feedOptions.deepCreator = creator;
+    if (mode === "hashtag") data.feedOptions.hashtag = hashtag;
     const args =
       mode === "deep"
         ? { mode: "deep", creator, expectedAccount: account, includeLiked }
-        : {
-            mode: "watch",
-            creators: [...list.users],
-            expectedAccount: account,
-            includeLiked,
-          };
+        : mode === "hashtag"
+          ? { hashtag, limit, expectedAccount: account, includeLiked }
+          : {
+              mode: "watch",
+              creators: [...list.users],
+              expectedAccount: account,
+              includeLiked,
+            };
     feeding = true;
     feedRequestPosted = false;
     feedCancelled = false;
-    $("refreshFeed").disabled = true;
-    $("deepFetch").disabled = true;
+    for (const id of ["refreshFeed", "deepFetch", "hashtagFetch"])
+      $(id).disabled = true;
     $("cancelFeed").hidden = false;
     $("feedProgress").hidden = false;
     rows = [];
+    baseRows = [];
+    feedResult = null;
     index = 0;
     resetArticleNavigation();
     renderArticle();
-    $("readerListName").textContent =
-      (mode === "deep" ? "深掘り：@" + creator : list.name) + " / RANDOM";
+    feedSource =
+      mode === "deep"
+        ? "深掘り：@" + creator
+        : mode === "hashtag"
+          ? "#" + hashtag
+          : list.name;
+    renderFeedLabel();
     $("feedStatus").textContent =
-      mode === "deep" ? "最大50本を探しています…" : "1人最大3本を探しています…";
+      mode === "deep"
+        ? "最大50本を探しています…"
+        : mode === "hashtag"
+          ? `#${hashtag} の記事を最大${limit}本探しています…`
+          : "1人最大3本を探しています…";
     try {
       await save();
       if (owner !== account || token !== feedSeq || feedCancelled) return;
       feedRequestPosted = true;
       const r = await rpc(
-        "watch_feed",
+        mode === "hashtag" ? "hashtag_feed" : "watch_feed",
         args,
         (p) => {
           if (token !== feedSeq) return;
@@ -421,42 +527,30 @@
         token !== feedSeq
       )
         return;
-      rows = (r.items || []).filter(
-        (row) => M.articleUrl(row.url) && (includeLiked || row.liked === false),
+      baseRows = (r.items || []).filter(
+        (row) =>
+          row && M.articleUrl(row.url) && (includeLiked || row.liked === false),
       );
+      rows = M.orderArticles(baseRows, data.feedOptions.articleOrder);
+      feedResult = { ...r, includeLiked };
       index = 0;
       renderArticle();
-      $("feedStatus").textContent =
-        `${r.cancelled ? "中断：" : ""}${rows.length}件をランダム表示 / ${includeLiked ? "スキ済みを含む" : "未スキのみ"}` +
-        (!includeLiked ? ` / スキ済み ${r.likedCount || 0}件をスキップ` : "") +
-        (r.statusFailedCount
-          ? ` / スキ状態不明 ${r.statusFailedCount}件を除外`
-          : "") +
-        (r.failedCreators?.length
-          ? ` / 取得失敗 ${r.failedCreators.length}人`
-          : "") +
-        (r.emptyCreators?.length
-          ? ` / 記事なし ${r.emptyCreators.length}人`
-          : "") +
-        (r.shortfallCreators?.length
-          ? ` / 目標本数に満たない人 ${r.shortfallCreators.length}人`
-          : "") +
-        (r.limitReachedCreators?.length
-          ? ` / 探索上限 ${r.limitReachedCreators.length}人（途中結果）`
-          : "");
+      renderFeedLabel();
+      renderFeedStatus();
     } catch (e) {
       if (token === feedSeq) $("feedStatus").textContent = e.message;
     } finally {
       feeding = false;
       feedRequestPosted = false;
-      $("refreshFeed").disabled = false;
-      $("deepFetch").disabled = false;
+      for (const id of ["refreshFeed", "deepFetch", "hashtagFetch"])
+        $(id).disabled = false;
       $("cancelFeed").hidden = true;
       $("feedProgress").hidden = true;
     }
   }
   $("refreshFeed").onclick = () => fetchArticles("watch");
   $("deepFetch").onclick = () => fetchArticles("deep");
+  $("hashtagFetch").onclick = () => fetchArticles("hashtag");
   $("cancelFeed").onclick = () => {
     if (!feeding) return;
     feedCancelled = true;
@@ -544,8 +638,8 @@
     $("title").textContent = row.name || "無題の記事";
     $("author").textContent =
       (row.nickname || row.urlname || "") +
-      (row.publishAt
-        ? " · " + new Date(row.publishAt).toLocaleDateString("ja-JP")
+      (M.formatPublishAt(row.publishAt)
+        ? " · " + M.formatPublishAt(row.publishAt)
         : "");
     const url = canonicalArticleUrl(row.url, row.key);
     $("original").hidden = !url;
@@ -653,25 +747,29 @@
       drain();
     }
   }
-  async function renderArticle({ scrollTop = 0, anchor = "" } = {}) {
-    const row = currentArticle(),
-      token = ++articleSeq;
-    cardObserver?.disconnect();
-    cardObserver = null;
+  function renderReaderControls() {
+    const row = currentArticle();
     $("empty").hidden = !!row;
     $("article").hidden = !row;
     $("articleBack").hidden = !articleHistory.length;
     $("position").textContent = rows.length
       ? `${linkedArticle ? "リンク先 · " : ""}${index + 1} / ${rows.length}`
       : "0 / 0";
-    $("like").disabled = true;
-    $("articleComment").disabled = true;
     $("prev").disabled = !!linkedArticle || !rows.length || index === 0;
     $("next").disabled =
       !!linkedArticle || !rows.length || index === rows.length - 1;
     $("articleHint").textContent = linkedArticle
       ? "リンク先の記事を表示中 / 「リンク元へ戻る」で読んでいた場所へ"
       : "上・下にスワイプ / ↑ ↓ キーで切り替え";
+  }
+  async function renderArticle({ scrollTop = 0, anchor = "" } = {}) {
+    const row = currentArticle(),
+      token = ++articleSeq;
+    cardObserver?.disconnect();
+    cardObserver = null;
+    renderReaderControls();
+    $("like").disabled = true;
+    $("articleComment").disabled = true;
     if (!row) return;
     if (!row.key) row.key = canonicalArticleUrl(row.url).split("/n/")[1] || "";
     updateArticleHeader(row);
@@ -836,9 +934,16 @@
           const url = M.articleUrl(item.articleUrl);
           if (!url) return;
           resetFeed();
-          rows = [{ url, key: url.split("/n/")[1], name: item.articleTitle }];
+          baseRows = [
+            { url, key: url.split("/n/")[1], name: item.articleTitle },
+          ];
+          rows = baseRows.slice();
+          feedSource = "返信待ちの記事";
+          feedResult = { includeLiked: true };
           index = 0;
           renderArticle();
+          renderFeedLabel();
+          renderFeedStatus();
         }),
       );
       $("inboxList").append(card);
@@ -1215,6 +1320,9 @@
     unknownReplyCount = 0;
     renderPendingLikes();
     rows = [];
+    baseRows = [];
+    feedSource = "";
+    feedResult = null;
     resetArticleNavigation();
     composer = null;
     $("composer").hidden = true;

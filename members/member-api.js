@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const A = globalThis.NeroAppApiCore;
-  A.C.VERSION = "0.5.1";
+  A.C.VERSION = "0.6.0";
   A.C.EXCLUDE_LIKED_COMMENTS = true;
   A.isReaderPort = (port) =>
     port?.sender?.id === browser.runtime.id &&

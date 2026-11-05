@@ -319,6 +319,23 @@ async function fakeFetch(value, options = {}) {
     return state.authStatus === 200
       ? response({ data: { key: state.owner + "-key", urlname: state.owner } })
       : response({ error: { message: "Session expired" } }, state.authStatus);
+  if (decodeURIComponent(url.pathname) === "/api/v3/hashtags/企画/notes") {
+    assert.equal(method, "GET");
+    assert.equal(url.searchParams.get("order"), "new");
+    const page = Number(url.searchParams.get("page"));
+    return response({
+      data: {
+        notes: sourceRows.slice((page - 1) * 50, page * 50).map((row) => ({
+          key: row.key,
+          name: row.name,
+          publish_at: row.publishAt,
+          user: row.user,
+        })),
+        next_page: page * 50 < sourceRows.length ? page + 1 : null,
+        is_last_page: page * 50 >= sourceRows.length,
+      },
+    });
+  }
   if (url.pathname === "/api/v2/creators/writer_a/contents") {
     if (state.holdPage) {
       const wait = state.holdPage;
@@ -570,6 +587,40 @@ try {
   assert.equal(included.items.length, 50);
   assert.equal(included.checkedArticles, 0);
   assert.ok(included.items.some((row) => row.key === "n0"));
+  const tagProgress = [];
+  const tagged = await rpc(
+    "hashtag_feed",
+    { hashtag: "#企画", expectedAccount: "alice", limit: 50 },
+    (p) => tagProgress.push(p),
+  );
+  assert.equal(tagged.ok, true);
+  assert.equal(tagged.items.length, 50);
+  assert.equal(tagged.hashtag, "企画");
+  assert.equal(tagged.hasMore, false);
+  assert.equal(tagged.likedCount, 3);
+  assert.equal(tagged.checkedArticles, 53);
+  assert.ok(tagProgress.length > 1);
+  assert.ok(tagged.items.every((row) => row.liked === false));
+  assert.ok(tagged.items.every((row) => row.publishAt.endsWith("Z")));
+  const allTagged = await rpc("hashtag_feed", {
+    hashtag: "https://note.com/hashtag/%E4%BC%81%E7%94%BB",
+    expectedAccount: "alice",
+    limit: 100,
+    includeLiked: true,
+  });
+  assert.equal(allTagged.items.length, 53);
+  assert.equal(allTagged.checkedArticles, 0);
+  assert.ok(allTagged.items.some((row) => row.key === "n0"));
+  assert.ok(
+    state.calls.some((call) => {
+      const url = new URL(call.url);
+      return (
+        decodeURIComponent(url.pathname) === "/api/v3/hashtags/企画/notes" &&
+        url.searchParams.get("page") === "2" &&
+        call.realm === "note-top-frame"
+      );
+    }),
+  );
   const article = await rpc("article", { key: "nlinked" });
   assert.equal(article.url, "https://note.com/writer_b/n/nlinked");
   assert.equal(article.title, "Linked fixture");

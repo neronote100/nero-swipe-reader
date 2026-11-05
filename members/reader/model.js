@@ -27,6 +27,99 @@ globalThis.NeroMemberModel = {
       return "";
     }
   },
+  articleOrder(value) {
+    return ["random", "date_desc", "date_asc"].includes(value)
+      ? value
+      : "random";
+  },
+  hashtagName(value) {
+    let tag = typeof value === "string" ? value.trim() : "";
+    if (/^https?:/i.test(tag)) {
+      try {
+        const url = new URL(tag);
+        if (
+          !/^https:\/\/note\.com\//i.test(tag) ||
+          url.hostname !== "note.com" ||
+          url.username ||
+          url.password ||
+          url.port
+        )
+          return "";
+        const match = url.pathname.match(/^\/(?:hashtag|tag)\/([^/]+)\/?$/);
+        if (!match) return "";
+        tag = decodeURIComponent(match[1]);
+      } catch {
+        return "";
+      }
+    } else tag = tag.replace(/^[#＃]/, "");
+    tag = tag.normalize("NFC");
+    const points = Array.from(tag);
+    if (
+      !points.length ||
+      points.length > 80 ||
+      /[\\/#＃\p{White_Space}\p{Cc}\p{Cf}]/u.test(tag) ||
+      tag === "." ||
+      tag === ".." ||
+      points.some(
+        (c) =>
+          c.length === 1 &&
+          c.charCodeAt(0) >= 0xd800 &&
+          c.charCodeAt(0) <= 0xdfff,
+      )
+    )
+      return "";
+    return tag;
+  },
+  orderLabel(value) {
+    return value === "date_desc"
+      ? "新しい順"
+      : value === "date_asc"
+        ? "古い順"
+        : "ランダム";
+  },
+  orderArticles(rows, order) {
+    if (!Array.isArray(rows)) return [];
+    // The backend already shuffles the complete result pool. Keep that
+    // baseline order when switching back to random, without mutating it.
+    if (!["date_desc", "date_asc"].includes(order)) return rows.slice();
+    return rows
+      .map((row, index) => ({
+        row,
+        index,
+        time:
+          typeof row?.publishAt === "string" && row.publishAt.trim()
+            ? Date.parse(row.publishAt)
+            : NaN,
+      }))
+      .sort((left, right) => {
+        const leftKnown = Number.isFinite(left.time),
+          rightKnown = Number.isFinite(right.time);
+        // Unknown publication times are never guessed from update times or
+        // treated as epoch zero. They stay last in either date direction.
+        if (!leftKnown || !rightKnown)
+          return leftKnown ? -1 : rightKnown ? 1 : left.index - right.index;
+        const byTime =
+          order === "date_asc"
+            ? left.time - right.time
+            : right.time - left.time;
+        return byTime || left.index - right.index;
+      })
+      .map((entry) => entry.row);
+  },
+  formatPublishAt(value) {
+    if (typeof value !== "string" || !value.trim()) return "";
+    const time = Date.parse(value);
+    if (!Number.isFinite(time)) return "";
+    return new Intl.DateTimeFormat("ja-JP", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(time));
+  },
   canSwipe(start, end, scroll) {
     return (
       Math.abs(end.y - start.y) > 85 &&
@@ -173,6 +266,12 @@ globalThis.NeroMemberModel = {
         includeLiked: input.feedOptions?.includeLiked === true,
         deepIncludeLiked: input.feedOptions?.deepIncludeLiked === true,
         deepCreator: M.watchName(input.feedOptions?.deepCreator),
+        articleOrder: M.articleOrder(input.feedOptions?.articleOrder),
+        hashtag: M.hashtagName(input.feedOptions?.hashtag),
+        hashtagIncludeLiked: input.feedOptions?.hashtagIncludeLiked === true,
+        hashtagLimit: [50, 100, 200].includes(input.feedOptions?.hashtagLimit)
+          ? input.feedOptions.hashtagLimit
+          : 100,
       },
       seedVersion:
         Number.isSafeInteger(input.seedVersion) && input.seedVersion > 0

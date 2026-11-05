@@ -46,6 +46,10 @@ assert.deepEqual(
     includeLiked: false,
     deepIncludeLiked: false,
     deepCreator: "",
+    articleOrder: "random",
+    hashtag: "",
+    hashtagIncludeLiked: false,
+    hashtagLimit: 100,
   },
   "legacy data defaults to unliked feeds and no deep creator",
 );
@@ -57,6 +61,7 @@ const rawPreferences = {
     includeLiked: true,
     deepIncludeLiked: false,
     deepCreator: "https://note.com/PREF_WRITER?from=profile",
+    articleOrder: "date_asc",
     unexpected: "discard",
   },
 };
@@ -65,6 +70,10 @@ assert.deepEqual(plain(preferences.feedOptions), {
   includeLiked: true,
   deepIncludeLiked: false,
   deepCreator: "pref_writer",
+  articleOrder: "date_asc",
+  hashtag: "",
+  hashtagIncludeLiked: false,
+  hashtagLimit: 100,
 });
 assert.equal(
   rawPreferences.feedOptions.deepCreator,
@@ -80,6 +89,7 @@ assert.deepEqual(
           includeLiked: "true",
           deepIncludeLiked: 1,
           deepCreator: "https://example.com/writer",
+          articleOrder: "DATE_DESC",
         },
       },
       "reader_owner",
@@ -90,6 +100,10 @@ assert.deepEqual(
     includeLiked: false,
     deepIncludeLiked: false,
     deepCreator: "",
+    articleOrder: "random",
+    hashtag: "",
+    hashtagIncludeLiked: false,
+    hashtagLimit: 100,
   },
   "truthy non-booleans and a foreign creator URL are not valid preferences",
 );
@@ -101,6 +115,7 @@ assert.deepEqual(
           includeLiked: false,
           deepIncludeLiked: true,
           deepCreator: "@DEEP_WRITER",
+          articleOrder: "date_desc",
         },
       },
       "reader_owner",
@@ -111,6 +126,10 @@ assert.deepEqual(
     includeLiked: false,
     deepIncludeLiked: true,
     deepCreator: "deep_writer",
+    articleOrder: "date_desc",
+    hashtag: "",
+    hashtagIncludeLiked: false,
+    hashtagLimit: 100,
   },
 );
 assert.deepEqual(
@@ -119,6 +138,10 @@ assert.deepEqual(
     includeLiked: false,
     deepIncludeLiked: false,
     deepCreator: "",
+    articleOrder: "random",
+    hashtag: "",
+    hashtagIncludeLiked: false,
+    hashtagLimit: 100,
   },
   "another account must not inherit a reader's feed preferences",
 );
@@ -206,6 +229,7 @@ for (const merge of [false, true]) {
         includeLiked: false,
         deepIncludeLiked: true,
         deepCreator: "external_writer",
+        articleOrder: "date_desc",
       },
     },
     { targetId: "list-2", merge },
